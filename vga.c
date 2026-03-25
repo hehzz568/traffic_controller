@@ -204,16 +204,12 @@ static volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
 
 static void clear_screen(short color);
 
-static void wait_for_vsync(void) {
-    *pixel_ctrl_ptr = 1;
-    while ((*(pixel_ctrl_ptr + 3) & 0x1) != 0) {
-    }
-}
-
 static void video_init(void) {
-    *(pixel_ctrl_ptr + 1) = PIXEL_BUF_BASE;
-    wait_for_vsync();
-    pixel_buffer = (volatile short *)PIXEL_BUF_BASE;
+    uint32_t front_buffer = (uint32_t)(*pixel_ctrl_ptr);
+    if (front_buffer == 0u) {
+        front_buffer = PIXEL_BUF_BASE;
+    }
+    pixel_buffer = (volatile short *)(uintptr_t)front_buffer;
     clear_screen(BLACK);
 }
 
