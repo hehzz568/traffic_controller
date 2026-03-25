@@ -3,7 +3,8 @@
 
 #define PS2_BASE        0xFF200100
 #define TIMER1_BASE     0xFF202000
-#define PIXEL_BUF_BASE  0x08000000
+#define PIXEL_CTRL_BASE 0xFF203020
+#define PIXEL_BUF_BASE  0xC8000000
 
 #define SCREEN_W 320
 #define SCREEN_H 240
@@ -198,9 +199,23 @@ typedef struct {
 
 static volatile int *const ps2_ptr = (int *)PS2_BASE;
 static volatile int *const timer_ptr = (int *)TIMER1_BASE;
-static volatile short *const pixel_buffer = (short *)PIXEL_BUF_BASE;
+static volatile int *const pixel_ctrl_ptr = (int *)PIXEL_CTRL_BASE;
+static volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
 
 static void clear_screen(short color);
+
+static void wait_for_vsync(void) {
+    *pixel_ctrl_ptr = 1;
+    while ((*(pixel_ctrl_ptr + 3) & 0x1) != 0) {
+    }
+}
+
+static void video_init(void) {
+    *(pixel_ctrl_ptr + 1) = PIXEL_BUF_BASE;
+    wait_for_vsync();
+    pixel_buffer = (volatile short *)PIXEL_BUF_BASE;
+    clear_screen(BLACK);
+}
 
 static int text_length(const char *text) {
     int len = 0;
@@ -547,10 +562,6 @@ static const char *phase_label(SignalPhase phase) {
     }
 }
 
-static const char *requested_label(FlowAxis flow) {
-    return (flow == FLOW_NS) ? "NS" : "EW";
-}
-
 static short random_car_color(GameState *game) {
     static const short palette[6] = {CYAN, BLUE, MAGENTA, ORANGE, SILVER, YELLOW};
     return palette[random_between(game, 0, 5)];
@@ -772,7 +783,7 @@ static bool spawn_zone_clear(const GameState *game, Approach approach, LaneType 
 }
 
 static void spawn_vehicle(GameState *game, Approach approach) {
-    LaneType lane = (random_between(game, 0, 99) < 35) ? LANE_TURN : LANE_STRAIGHT;
+    LaneType lane = LANE_STRAIGHT;
     if (!spawn_zone_clear(game, approach, lane)) {
         return;
     }
@@ -863,16 +874,6 @@ static int active_vehicle_count(const GameState *game) {
     int count = 0;
     for (int i = 0; i < MAX_VEHICLES; i++) {
         if (game->vehicles[i].active) {
-            count++;
-        }
-    }
-    return count;
-}
-
-static int vehicle_count_for_approach(const GameState *game, Approach approach) {
-    int count = 0;
-    for (int i = 0; i < MAX_VEHICLES; i++) {
-        if (game->vehicles[i].active && game->vehicles[i].approach == approach) {
             count++;
         }
     }
@@ -1145,19 +1146,11 @@ static void update_gameplay(GameState *game) {
     bool conflict_locked = any_vehicle_in_conflict(game);
     update_lane(game, APPROACH_NORTH, LANE_STRAIGHT, &conflict_locked);
     conflict_locked = any_vehicle_in_conflict(game);
-    update_lane(game, APPROACH_NORTH, LANE_TURN, &conflict_locked);
-    conflict_locked = any_vehicle_in_conflict(game);
     update_lane(game, APPROACH_SOUTH, LANE_STRAIGHT, &conflict_locked);
-    conflict_locked = any_vehicle_in_conflict(game);
-    update_lane(game, APPROACH_SOUTH, LANE_TURN, &conflict_locked);
     conflict_locked = any_vehicle_in_conflict(game);
     update_lane(game, APPROACH_WEST, LANE_STRAIGHT, &conflict_locked);
     conflict_locked = any_vehicle_in_conflict(game);
-    update_lane(game, APPROACH_WEST, LANE_TURN, &conflict_locked);
-    conflict_locked = any_vehicle_in_conflict(game);
     update_lane(game, APPROACH_EAST, LANE_STRAIGHT, &conflict_locked);
-    conflict_locked = any_vehicle_in_conflict(game);
-    update_lane(game, APPROACH_EAST, LANE_TURN, &conflict_locked);
 
     update_metrics_and_cleanup(game);
 }
@@ -1273,18 +1266,6 @@ static void draw_building_block(int x1, int y1, int x2, int y2) {
     }
 }
 
-static void draw_crosswalk_horizontal(int x1, int x2, int y) {
-    for (int x = x1; x <= x2; x += 12) {
-        draw_box(x, y, x + 6, y + 7, CROSSWALK);
-    }
-}
-
-static void draw_crosswalk_vertical(int x, int y1, int y2) {
-    for (int y = y1; y <= y2; y += 12) {
-        draw_box(x, y, x + 7, y + 6, CROSSWALK);
-    }
-}
-
 static void draw_arrow_up(int x, int y, short color) {
     draw_box(x + 3, y, x + 5, y + 8, color);
     draw_box(x + 1, y + 2, x + 7, y + 4, color);
@@ -1316,36 +1297,13 @@ static void draw_card_label(int x, int y, const char *label, int value, short ac
 }
 
 static void draw_intersection_base(void) {
-    clear_screen(CITY_BG);
-    draw_building_block(6, 24, 96, 62);
-    draw_building_block(224, 24, 314, 62);
-    draw_building_block(6, 178, 96, 216);
-    draw_building_block(224, 178, 314, 216);
-
+    clear_screen(GRASS);
     draw_box(0, ROAD_Y1, SCREEN_W - 1, ROAD_Y2, ROAD);
     draw_box(ROAD_X1, 0, ROAD_X2, SCREEN_H - 1, ROAD);
-    draw_box(ROAD_X1 + 16, ROAD_Y1 + 16, ROAD_X2 - 16, ROAD_Y2 - 16, ASPHALT_DARK);
-
-    draw_box(0, ROAD_Y1 - 8, SCREEN_W - 1, ROAD_Y1 - 1, SIDEWALK);
-    draw_box(0, ROAD_Y2 + 1, SCREEN_W - 1, ROAD_Y2 + 8, SIDEWALK);
-    draw_box(ROAD_X1 - 8, 0, ROAD_X1 - 1, SCREEN_H - 1, SIDEWALK);
-    draw_box(ROAD_X2 + 1, 0, ROAD_X2 + 8, SCREEN_H - 1, SIDEWALK);
-
-    draw_box(0, ROAD_Y1 - 2, SCREEN_W - 1, ROAD_Y1 - 1, SILVER);
-    draw_box(0, ROAD_Y2 + 1, SCREEN_W - 1, ROAD_Y2 + 2, SILVER);
-    draw_box(ROAD_X1 - 2, 0, ROAD_X1 - 1, SCREEN_H - 1, SILVER);
-    draw_box(ROAD_X2 + 1, 0, ROAD_X2 + 2, SCREEN_H - 1, SILVER);
-    draw_box(0, ROAD_Y1, SCREEN_W - 1, ROAD_Y1, ROAD_EDGE);
-    draw_box(0, ROAD_Y2, SCREEN_W - 1, ROAD_Y2, ROAD_EDGE);
-    draw_box(ROAD_X1, 0, ROAD_X1, SCREEN_H - 1, ROAD_EDGE);
-    draw_box(ROAD_X2, 0, ROAD_X2, SCREEN_H - 1, ROAD_EDGE);
-
-    draw_box(142, 0, 143, SCREEN_H - 1, LANE_FAINT);
-    draw_box(160, 0, 161, SCREEN_H - 1, WHITE);
-    draw_box(178, 0, 179, SCREEN_H - 1, LANE_FAINT);
-    draw_box(0, 94, SCREEN_W - 1, 95, LANE_FAINT);
-    draw_box(0, 120, SCREEN_W - 1, 121, WHITE);
-    draw_box(0, 146, SCREEN_W - 1, 147, LANE_FAINT);
+    draw_rect_outline(0, ROAD_Y1, SCREEN_W - 1, ROAD_Y2, ROAD_EDGE);
+    draw_rect_outline(ROAD_X1, 0, ROAD_X2, SCREEN_H - 1, ROAD_EDGE);
+    draw_box(159, 0, 160, SCREEN_H - 1, WHITE);
+    draw_box(0, 119, SCREEN_W - 1, 120, WHITE);
 
     for (int x = 0; x < SCREEN_W; x += 22) {
         if (x + 10 < ROAD_X1 || x > ROAD_X2) {
@@ -1360,28 +1318,10 @@ static void draw_intersection_base(void) {
         }
     }
 
-    draw_crosswalk_horizontal(116, 194, ROAD_Y1 - 7);
-    draw_crosswalk_horizontal(116, 194, ROAD_Y2 + 1);
-    draw_crosswalk_vertical(ROAD_X1 - 7, 70, 162);
-    draw_crosswalk_vertical(ROAD_X2 + 1, 70, 162);
-
-    draw_arrow_down(N_TURN_X - 1, 38, LANE_FAINT);
     draw_arrow_down(N_STRAIGHT_X - 1, 38, WHITE);
     draw_arrow_up(S_STRAIGHT_X - 1, 191, WHITE);
-    draw_arrow_up(S_TURN_X - 1, 191, LANE_FAINT);
     draw_arrow_right(34, W_STRAIGHT_Y - 1, WHITE);
-    draw_arrow_right(34, W_TURN_Y - 1, LANE_FAINT);
     draw_arrow_left(274, E_STRAIGHT_Y - 1, WHITE);
-    draw_arrow_left(274, E_TURN_Y - 1, LANE_FAINT);
-
-    draw_box(ROAD_X1 + 6, ROAD_Y1 + 6, ROAD_X1 + 20, ROAD_Y1 + 20, SIDEWALK);
-    draw_box(ROAD_X2 - 20, ROAD_Y1 + 6, ROAD_X2 - 6, ROAD_Y1 + 20, SIDEWALK);
-    draw_box(ROAD_X1 + 6, ROAD_Y2 - 20, ROAD_X1 + 20, ROAD_Y2 - 6, SIDEWALK);
-    draw_box(ROAD_X2 - 20, ROAD_Y2 - 20, ROAD_X2 - 6, ROAD_Y2 - 6, SIDEWALK);
-    draw_rect_outline(ROAD_X1 + 6, ROAD_Y1 + 6, ROAD_X1 + 20, ROAD_Y1 + 20, PANEL_EDGE);
-    draw_rect_outline(ROAD_X2 - 20, ROAD_Y1 + 6, ROAD_X2 - 6, ROAD_Y1 + 20, PANEL_EDGE);
-    draw_rect_outline(ROAD_X1 + 6, ROAD_Y2 - 20, ROAD_X1 + 20, ROAD_Y2 - 6, PANEL_EDGE);
-    draw_rect_outline(ROAD_X2 - 20, ROAD_Y2 - 20, ROAD_X2 - 6, ROAD_Y2 - 6, PANEL_EDGE);
 }
 
 static void draw_signal_hud(const GameState *game) {
@@ -1551,6 +1491,7 @@ static void render_scene(const GameState *game) {
 int main(void) {
     GameState game;
     init_game(&game);
+    video_init();
     timer_init(TICK_COUNTS);
     render_scene(&game);
 
