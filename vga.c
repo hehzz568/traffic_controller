@@ -129,9 +129,8 @@ void present_frame(void) {
 }
 
 void video_init(void) {
-    uint32_t back = (uint32_t)(uintptr_t)&sdram_back_buffer[0][0];
-    *(pixel_ctrl_ptr + 1) = (int)back;
-    pixel_buffer = (volatile short *)(uintptr_t)back;
+    *(pixel_ctrl_ptr + 1) = BACK_BUF_BASE;
+    pixel_buffer = (volatile short *)(uintptr_t)BACK_BUF_BASE;
     clear_screen(BLACK);
     present_frame();
     clear_screen(BLACK);
