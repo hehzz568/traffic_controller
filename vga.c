@@ -92,7 +92,7 @@ volatile int *ps2_ptr   = (int *)PS2_BASE;
 volatile int *timer_ptr = (int *)TIMER1_BASE;
 volatile int *pixel_ctrl_ptr = (int *)PIXEL_CTRL_BASE;
 volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
-#define BACK_BUF_BASE 0xC0000000
+#define BACK_BUF_BASE 0x02000000
 
 static LightState light_state = NS_GREEN;
 static ControlMode mode = AUTO_MODE;
@@ -160,10 +160,11 @@ void draw_box(int x1, int y1, int x2, int y2, short color) {
 }
 
 void clear_screen(short color) {
-    int total_pixels = SCREEN_W * SCREEN_H;
-    volatile short *ptr = pixel_buffer;
-    for (int i = 0; i < total_pixels; i++) {
-        *(ptr++) = color;
+    for (int y = 0; y < SCREEN_H; y++) {
+        volatile short *row_ptr = (volatile short *)((uintptr_t)pixel_buffer + (y << 10));
+        for (int x = 0; x < SCREEN_W; x++) {
+            row_ptr[x] = color;
+        }
     }
 }
 
@@ -752,7 +753,7 @@ void draw_hud(void) {
     draw_text(92, 6, "PASS", WHITE, 1);
     draw_int(120, 6, passed, GREEN, 1);
     draw_text(168, 6, "WAIT", WHITE, 1);
-    draw_int(196, 6, wait_ticks_total / 10, ORANGE, 1);
+   draw_int(196, 6, wait_ticks_total / WAIT_PENALTY_DIVISOR, ORANGE, 1);
     draw_text(248, 6, "TIME", WHITE, 1);
     draw_int(278, 6, time_left, CYAN, 1);
 
@@ -916,7 +917,12 @@ int main(void) {
             }
         }
 
-        int key = ps2_get_make_code();
+      int key = ps2_get_make_code();
+        
+        if (scene == SCENE_TITLE) {
+            rng_state += *(timer_ptr + 4); // Change the seed while waiting
+        }
+
         if (key != -1) {
             if (scene == SCENE_TITLE) {
                 if (key == 0x29) {      // SPACE
