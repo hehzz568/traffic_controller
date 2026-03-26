@@ -92,7 +92,7 @@ volatile int *ps2_ptr   = (int *)PS2_BASE;
 volatile int *timer_ptr = (int *)TIMER1_BASE;
 volatile int *pixel_ctrl_ptr = (int *)PIXEL_CTRL_BASE;
 volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
-static short sdram_back_buffer[SCREEN_H][512];
+#define BACK_BUF_BASE 0xC0000000
 
 static LightState light_state = NS_GREEN;
 static ControlMode mode = AUTO_MODE;
