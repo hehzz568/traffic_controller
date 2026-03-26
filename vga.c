@@ -160,7 +160,11 @@ void draw_box(int x1, int y1, int x2, int y2, short color) {
 }
 
 void clear_screen(short color) {
-    draw_box(0, 0, SCREEN_W - 1, SCREEN_H - 1, color);
+    int total_pixels = SCREEN_W * SCREEN_H;
+    volatile short *ptr = pixel_buffer;
+    for (int i = 0; i < total_pixels; i++) {
+        *(ptr++) = color;
+    }
 }
 
 int text_len(const char *s) {
