@@ -37,12 +37,17 @@
 #define STOP_S 166
 #define STOP_W 112
 #define STOP_E 206
+#define CONFLICT_X1 134
+#define CONFLICT_X2 186
+#define CONFLICT_Y1 94
+#define CONFLICT_Y2 146
 
 #define TICK_COUNTS 5000000U
 #define NS_GREEN_TICKS 22
 #define NS_YELLOW_TICKS 6
 #define EW_GREEN_TICKS 22
 #define EW_YELLOW_TICKS 6
+#define ALL_RED_TICKS 4
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
 #define PASS_SCORE 25
@@ -51,6 +56,7 @@
 typedef enum {
     NS_GREEN = 0,
     NS_YELLOW,
+    ALL_RED,
     EW_GREEN,
     EW_YELLOW
 } LightState;
@@ -86,6 +92,7 @@ typedef struct {
     int x;
     int y;
     bool scored;
+    short color;
 } Car;
 
 volatile int *ps2_ptr   = (int *)PS2_BASE;
@@ -114,6 +121,7 @@ static int queue_n = 0;
 static int queue_s = 0;
 static int queue_w = 0;
 static int queue_e = 0;
+static LightState next_green_state = NS_GREEN;
 
 void clear_screen(short color);
 
@@ -365,6 +373,18 @@ uint32_t next_rand(void) {
     return rng_state;
 }
 
+short random_car_color(void) {
+    static const short palette[6] = {
+        0xF800, /* red */
+        0x07E0, /* green */
+        0x001F, /* blue */
+        0xFD20, /* orange */
+        0xF81F, /* magenta */
+        0x07FF  /* cyan */
+    };
+    return palette[next_rand() % 6u];
+}
+
 bool is_green_for_dir(Direction dir) {
     if (dir == DIR_NORTH || dir == DIR_SOUTH) {
         return light_state == NS_GREEN;
@@ -413,6 +433,7 @@ bool cars_overlap(const Car *a, const Car *b) {
 
 void reset_round(void) {
     light_state = NS_GREEN;
+    next_green_state = NS_GREEN;
     mode = AUTO_MODE;
     phase_ticks = 0;
     score = 0;
@@ -433,10 +454,10 @@ void reset_round(void) {
 }
 
 int spawn_chance_percent(void) {
-    int level = elapsed_ticks / 200;
-    int chance = 20 + level * 3;
-    if (chance > 42) {
-        chance = 42;
+    int level = elapsed_ticks / 260;
+    int chance = 14 + level * 2;
+    if (chance > 28) {
+        chance = 28;
     }
     return chance;
 }
@@ -469,6 +490,7 @@ void maybe_spawn_car(void) {
             cars[i].x = sx;
             cars[i].y = sy;
             cars[i].scored = false;
+            cars[i].color = random_car_color();
             return;
         }
     }
@@ -500,6 +522,38 @@ bool detect_crash(void) {
             if (!cars_overlap(&cars[i], &cars[j])) continue;
             crash_x = (cars[i].x + cars[j].x) / 2;
             crash_y = (cars[i].y + cars[j].y) / 2;
+            return true;
+        }
+    }
+    return false;
+}
+
+int axis_for_dir(Direction dir) {
+    if (dir == DIR_NORTH || dir == DIR_SOUTH) {
+        return 0;
+    }
+    return 1;
+}
+
+bool car_hits_conflict_zone_at(const Car *car, int x, int y) {
+    int x2 = x + car_width(car) - 1;
+    int y2 = y + car_height(car) - 1;
+    return rect_overlap(x, y, x2, y2, CONFLICT_X1, CONFLICT_Y1, CONFLICT_X2, CONFLICT_Y2);
+}
+
+bool conflict_zone_blocked(const Car *car, int nx, int ny) {
+    if (!car_hits_conflict_zone_at(car, nx, ny)) {
+        return false;
+    }
+
+    for (int i = 0; i < MAX_CARS; i++) {
+        if (!cars[i].active || &cars[i] == car) {
+            continue;
+        }
+        if (!car_hits_conflict_zone_at(&cars[i], cars[i].x, cars[i].y)) {
+            continue;
+        }
+        if (axis_for_dir(cars[i].dir) != axis_for_dir(car->dir)) {
             return true;
         }
     }
@@ -549,7 +603,8 @@ void update_cars(void) {
             if (cars[i].dir == DIR_EAST  && nx <= STOP_E) stopped_by_light = true;
         }
 
-        if (stopped_by_light || blocked_by_leader(&cars[i], nx, ny)) {
+        if (stopped_by_light || blocked_by_leader(&cars[i], nx, ny) ||
+            conflict_zone_blocked(&cars[i], nx, ny)) {
             wait_ticks_total++;
             continue;
         }
@@ -580,10 +635,14 @@ void update_lights_auto(void) {
                             ((ew_load > ns_load) || (ew_load > 0 && ns_load == 0) || reached_max);
         if (should_yield) {
             light_state = NS_YELLOW;
+            next_green_state = EW_GREEN;
             phase_ticks = 0;
         }
     } else if (light_state == NS_YELLOW && phase_ticks >= NS_YELLOW_TICKS) {
-        light_state = EW_GREEN;
+        light_state = ALL_RED;
+        phase_ticks = 0;
+    } else if (light_state == ALL_RED && phase_ticks >= ALL_RED_TICKS) {
+        light_state = next_green_state;
         phase_ticks = 0;
     } else if (light_state == EW_GREEN) {
         int ns_load = queue_n + queue_s;
@@ -593,10 +652,11 @@ void update_lights_auto(void) {
                             ((ns_load > ew_load) || (ns_load > 0 && ew_load == 0) || reached_max);
         if (should_yield) {
             light_state = EW_YELLOW;
+            next_green_state = NS_GREEN;
             phase_ticks = 0;
         }
     } else if (light_state == EW_YELLOW && phase_ticks >= EW_YELLOW_TICKS) {
-        light_state = NS_GREEN;
+        light_state = ALL_RED;
         phase_ticks = 0;
     }
 }
@@ -674,6 +734,10 @@ void draw_lights(void) {
             ns_yellow = YELLOW;
             ew_red    = RED;
             break;
+        case ALL_RED:
+            ns_red = RED;
+            ew_red = RED;
+            break;
         case EW_GREEN:
             ew_green = GREEN;
             ns_red   = RED;
@@ -702,7 +766,11 @@ void draw_vehicle_sprite(const Car *car) {
     int y = car->y;
     int w = car_width(car);
     int h = car_height(car);
-    short body = (car->dir == DIR_NORTH || car->dir == DIR_SOUTH) ? CYAN : ORANGE;
+    short body = car->color;
+    short glass = 0xBEFF;
+    short roof = WHITE;
+    short head = YELLOW;
+    short tail = RED;
 
     draw_box(x + 1, y + 1, x + w, y + h, DARKGRAY);
     draw_box(x, y, x + w - 1, y + h - 1, body);
@@ -712,29 +780,33 @@ void draw_vehicle_sprite(const Car *car) {
     draw_box(x + w - 1, y, x + w - 1, y + h - 1, BLACK);
 
     if (car->dir == DIR_NORTH) {
-        draw_box(x + 2, y + 1, x + w - 3, y + 2, YELLOW);
-        draw_box(x + 1, y + 3, x + w - 2, y + 5, WHITE);
-        draw_box(x + 1, y + 6, x + w - 2, y + h - 5, 0xBEFF);
-        draw_box(x + 1, y + h - 3, x + 2, y + h - 2, RED);
-        draw_box(x + w - 3, y + h - 3, x + w - 2, y + h - 2, RED);
+        draw_box(x + 2, y + 1, x + w - 3, y + 2, head);
+        draw_box(x + 1, y + 3, x + w - 2, y + 5, roof);
+        draw_box(x + 1, y + 6, x + w - 2, y + h - 5, glass);
+        draw_box(x + 1, y + h - 4, x + w - 2, y + h - 4, BLACK);
+        draw_box(x + 1, y + h - 3, x + 2, y + h - 2, tail);
+        draw_box(x + w - 3, y + h - 3, x + w - 2, y + h - 2, tail);
     } else if (car->dir == DIR_SOUTH) {
-        draw_box(x + 2, y + h - 3, x + w - 3, y + h - 2, YELLOW);
-        draw_box(x + 1, y + h - 6, x + w - 2, y + h - 4, WHITE);
-        draw_box(x + 1, y + 3, x + w - 2, y + h - 7, 0xBEFF);
-        draw_box(x + 1, y + 1, x + 2, y + 2, RED);
-        draw_box(x + w - 3, y + 1, x + w - 2, y + 2, RED);
+        draw_box(x + 2, y + h - 3, x + w - 3, y + h - 2, head);
+        draw_box(x + 1, y + h - 6, x + w - 2, y + h - 4, roof);
+        draw_box(x + 1, y + 3, x + w - 2, y + h - 7, glass);
+        draw_box(x + 1, y + 3, x + w - 2, y + 3, BLACK);
+        draw_box(x + 1, y + 1, x + 2, y + 2, tail);
+        draw_box(x + w - 3, y + 1, x + w - 2, y + 2, tail);
     } else if (car->dir == DIR_WEST) {
-        draw_box(x + w - 3, y + 2, x + w - 2, y + h - 3, YELLOW);
-        draw_box(x + w - 6, y + 1, x + w - 4, y + h - 2, WHITE);
-        draw_box(x + 3, y + 1, x + w - 7, y + h - 2, 0xBEFF);
-        draw_box(x + 1, y + 1, x + 2, y + 2, RED);
-        draw_box(x + 1, y + h - 3, x + 2, y + h - 2, RED);
+        draw_box(x + w - 2, y + 2, x + w - 1, y + h - 3, head);
+        draw_box(x + w - 5, y + 1, x + w - 3, y + h - 2, roof);
+        draw_box(x + 3, y + 1, x + w - 6, y + h - 2, glass);
+        draw_box(x + 3, y + 1, x + 3, y + h - 2, BLACK);
+        draw_box(x + 1, y + 1, x + 2, y + 2, tail);
+        draw_box(x + 1, y + h - 3, x + 2, y + h - 2, tail);
     } else {
-        draw_box(x + 1, y + 2, x + 2, y + h - 3, YELLOW);
-        draw_box(x + 3, y + 1, x + 5, y + h - 2, WHITE);
-        draw_box(x + 6, y + 1, x + w - 4, y + h - 2, 0xBEFF);
-        draw_box(x + w - 3, y + 1, x + w - 2, y + 2, RED);
-        draw_box(x + w - 3, y + h - 3, x + w - 2, y + h - 2, RED);
+        draw_box(x, y + 2, x + 1, y + h - 3, head);
+        draw_box(x + 2, y + 1, x + 4, y + h - 2, roof);
+        draw_box(x + 5, y + 1, x + w - 4, y + h - 2, glass);
+        draw_box(x + w - 4, y + 1, x + w - 4, y + h - 2, BLACK);
+        draw_box(x + w - 3, y + 1, x + w - 2, y + 2, tail);
+        draw_box(x + w - 3, y + h - 3, x + w - 2, y + h - 2, tail);
     }
 }
 
@@ -820,12 +892,13 @@ void draw_instructions(void) {
     draw_text(88, 132, "SPACE START OR PAUSE", WHITE, 1);
     draw_text(88, 146, "A TOGGLE AUTO MANUAL", WHITE, 1);
     draw_text(88, 160, "1 NS GREEN   2 EW GREEN", WHITE, 1);
-    draw_text(88, 174, "R RESTART    S TITLE", WHITE, 1);
+    draw_text(88, 174, "3 ALL RED    R RESTART", WHITE, 1);
+    draw_text(88, 188, "S TITLE", WHITE, 1);
 
-    draw_text(34, 196, "END", CYAN, 1);
-    draw_text(88, 196, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
+    draw_text(34, 202, "END", CYAN, 1);
+    draw_text(88, 202, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
 
-    draw_text_centered(210, "SPACE PLAY   S BACK", MAGENTA, 1);
+    draw_text_centered(214, "SPACE PLAY   S BACK", MAGENTA, 1);
     present_frame();
 }
 
@@ -851,22 +924,25 @@ void draw_game_over(void) {
         draw_text_centered(52, "ROUND CLEAR", GREEN, 2);
         draw_text_centered(84, "TIME LIMIT REACHED", CYAN, 1);
     }
-    draw_box(60, 102, 154, 166, ROAD);
-    draw_box(166, 102, 260, 166, ROAD);
-    draw_text(88, 112, "SCORE", WHITE, 1);
-    draw_int(92, 130, score, YELLOW, 2);
-    draw_text(200, 112, "PASS", WHITE, 1);
-    draw_int(204, 130, passed, GREEN, 2);
-    draw_text_centered(178, "PASS +25", WHITE, 1);
-    draw_text_centered(192, "WAIT PENALTY = WAIT / 6", WHITE, 1);
-    draw_text_centered(206, "SPACE RETRY   S TITLE", MAGENTA, 1);
+    draw_box(58, 102, 154, 158, ROAD);
+    draw_box(166, 102, 262, 158, ROAD);
+    draw_box(60, 104, 152, 156, CITY_BG);
+    draw_box(168, 104, 260, 156, CITY_BG);
+    draw_text(84, 112, "SCORE", WHITE, 1);
+    draw_int(88, 130, score, YELLOW, 2);
+    draw_text(198, 112, "PASS", WHITE, 1);
+    draw_int(202, 130, passed, GREEN, 2);
+    draw_text_centered(166, "PASS +25", WHITE, 1);
+    draw_text_centered(178, "WAIT - WAIT/6", WHITE, 1);
+    draw_text_centered(190, "SPACE RETRY", MAGENTA, 1);
+    draw_text_centered(200, "S TITLE", MAGENTA, 1);
     present_frame();
 }
 
 // Main controls:
 // TITLE: SPACE start, I info
 // INSTRUCTIONS: SPACE start, S back
-// PLAYING: SPACE/P pause, A auto/manual, 1 force NS, 2 force EW, R restart, S title
+// PLAYING: SPACE/P pause, A auto/manual, 1 force NS, 2 force EW, 3 all red, R restart, S title
 // PAUSED: SPACE resume, S title
 // GAME OVER: SPACE retry, S title
 int main(void) {
@@ -954,6 +1030,12 @@ int main(void) {
                 } else if (key == 0x1E) {   // '2'
                     mode = MANUAL_MODE;
                     light_state = EW_GREEN;
+                    next_green_state = EW_GREEN;
+                    phase_ticks = 0;
+                    redraw_all();
+                } else if (key == 0x26) {   // '3'
+                    mode = MANUAL_MODE;
+                    light_state = ALL_RED;
                     phase_ticks = 0;
                     redraw_all();
                 } else if (key == 0x1C) {   // 'A'
