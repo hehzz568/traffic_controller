@@ -51,7 +51,8 @@
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
 #define PASS_SCORE 25
-#define WAIT_PENALTY_DIVISOR 6
+#define WAIT_DISPLAY_DIVISOR 20
+#define WAIT_PENALTY_DIVISOR 40
 
 typedef enum {
     NS_GREEN = 0,
@@ -570,6 +571,10 @@ void update_score(void) {
     }
 }
 
+int wait_seconds_total(void) {
+    return wait_ticks_total / WAIT_DISPLAY_DIVISOR;
+}
+
 bool blocked_by_leader(const Car *car, int nx, int ny) {
     for (int i = 0; i < MAX_CARS; i++) {
         if (!cars[i].active || &cars[i] == car || cars[i].dir != car->dir) {
@@ -819,13 +824,14 @@ void draw_cars(void) {
 
 void draw_hud(void) {
     int time_left = (ROUND_TICKS - elapsed_ticks) / 10;
+    int wait_seconds = wait_seconds_total();
     if (time_left < 0) time_left = 0;
     draw_text(6, 6, "SCORE", WHITE, 1);
     draw_int(40, 6, score, YELLOW, 1);
     draw_text(92, 6, "PASS", WHITE, 1);
     draw_int(120, 6, passed, GREEN, 1);
     draw_text(168, 6, "WAIT", WHITE, 1);
-   draw_int(196, 6, wait_ticks_total / WAIT_PENALTY_DIVISOR, ORANGE, 1);
+    draw_int(196, 6, wait_seconds, ORANGE, 1);
     draw_text(248, 6, "TIME", WHITE, 1);
     draw_int(278, 6, time_left, CYAN, 1);
 
@@ -885,20 +891,21 @@ void draw_instructions(void) {
 
     draw_text(34, 84, "SCORE", CYAN, 1);
     draw_text(88, 84, "PASS +25", WHITE, 1);
-    draw_text(88, 98, "WAIT PENALTY = WAIT / 6", WHITE, 1);
-    draw_text(88, 112, "AUTO MODE FOLLOWS QUEUE LOAD", WHITE, 1);
+    draw_text(88, 98, "WAIT SHOWS TOTAL SECONDS", WHITE, 1);
+    draw_text(88, 112, "SCORE PENALTY = WAIT SEC / 2", WHITE, 1);
+    draw_text(88, 126, "AUTO MODE FOLLOWS QUEUE LOAD", WHITE, 1);
 
-    draw_text(34, 132, "KEYS", CYAN, 1);
-    draw_text(88, 132, "SPACE START OR PAUSE", WHITE, 1);
-    draw_text(88, 146, "A TOGGLE AUTO MANUAL", WHITE, 1);
-    draw_text(88, 160, "1 NS GREEN   2 EW GREEN", WHITE, 1);
-    draw_text(88, 174, "3 ALL RED    R RESTART", WHITE, 1);
-    draw_text(88, 188, "S TITLE", WHITE, 1);
+    draw_text(34, 144, "KEYS", CYAN, 1);
+    draw_text(88, 144, "SPACE START OR PAUSE", WHITE, 1);
+    draw_text(88, 158, "A TOGGLE AUTO MANUAL", WHITE, 1);
+    draw_text(88, 172, "1 NS GREEN   2 EW GREEN", WHITE, 1);
+    draw_text(88, 186, "3 ALL RED    R RESTART", WHITE, 1);
+    draw_text(88, 200, "S TITLE", WHITE, 1);
 
-    draw_text(34, 202, "END", CYAN, 1);
-    draw_text(88, 202, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
+    draw_text(34, 214, "END", CYAN, 1);
+    draw_text(88, 214, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
 
-    draw_text_centered(214, "SPACE PLAY   S BACK", MAGENTA, 1);
+    draw_text_centered(226, "SPACE PLAY   S BACK", MAGENTA, 1);
     present_frame();
 }
 
@@ -933,7 +940,7 @@ void draw_game_over(void) {
     draw_text(198, 112, "PASS", WHITE, 1);
     draw_int(202, 130, passed, GREEN, 2);
     draw_text_centered(166, "PASS +25", WHITE, 1);
-    draw_text_centered(178, "WAIT - WAIT/6", WHITE, 1);
+    draw_text_centered(178, "WAIT SEC / 2", WHITE, 1);
     draw_text_centered(190, "SPACE RETRY", MAGENTA, 1);
     draw_text_centered(200, "S TITLE", MAGENTA, 1);
     present_frame();

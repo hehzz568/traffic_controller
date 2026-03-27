@@ -33,13 +33,13 @@ There is currently no other elimination rule besides collision.
 The score is intentionally simple and deterministic:
 
 - `+25` for every car that successfully passes the stop line and clears the junction flow
-- `-(wait_ticks_total / 6)` as a waiting penalty
+- `-(wait_ticks_total / 40)` as a waiting penalty
 - Score is clamped so it never goes below `0`
 
 In other words:
 
 ```text
-score = max(0, passed * 25 - wait_ticks_total / 6)
+score = max(0, passed * 25 - wait_ticks_total / 40)
 ```
 
 This means:
@@ -54,7 +54,7 @@ During play the HUD shows:
 
 - Current `SCORE`
 - Total cars `PASS`ed through the intersection
-- Accumulated `WAIT` penalty time
+- Accumulated `WAIT` time in seconds (summed across all waiting cars)
 - Remaining `TIME`
 - Current `BEST` score for this run of the program
 - Queue counts for `N`, `S`, `W`, and `E`
