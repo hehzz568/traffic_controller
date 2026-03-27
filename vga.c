@@ -746,10 +746,18 @@ void update_lights_auto(void) {
 void update_light_transition(void) {
     phase_ticks++;
     if (light_state == NS_YELLOW && phase_ticks >= NS_YELLOW_TICKS) {
-        light_state = ALL_RED;
+        if (mode == MANUAL_MODE && next_green_state != ALL_RED) {
+            light_state = next_green_state;
+        } else {
+            light_state = ALL_RED;
+        }
         phase_ticks = 0;
     } else if (light_state == EW_YELLOW && phase_ticks >= EW_YELLOW_TICKS) {
-        light_state = ALL_RED;
+        if (mode == MANUAL_MODE && next_green_state != ALL_RED) {
+            light_state = next_green_state;
+        } else {
+            light_state = ALL_RED;
+        }
         phase_ticks = 0;
     } else if (light_state == ALL_RED && next_green_state != ALL_RED && phase_ticks >= ALL_RED_TICKS) {
         light_state = next_green_state;
