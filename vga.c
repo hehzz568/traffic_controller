@@ -641,6 +641,10 @@ const char *light_state_label(void) {
 
 int phase_countdown_ticks(void) {
     int remaining = 0;
+    if (mode == MANUAL_MODE && (light_state == NS_GREEN || light_state == EW_GREEN ||
+        (light_state == ALL_RED && next_green_state == ALL_RED))) {
+        return 0;
+    }
     switch (light_state) {
         case NS_GREEN:
             remaining = NS_GREEN_TICKS - phase_ticks;
@@ -725,12 +729,6 @@ void update_lights_auto(void) {
             next_green_state = EW_GREEN;
             phase_ticks = 0;
         }
-    } else if (light_state == NS_YELLOW && phase_ticks >= NS_YELLOW_TICKS) {
-        light_state = ALL_RED;
-        phase_ticks = 0;
-    } else if (light_state == ALL_RED && phase_ticks >= ALL_RED_TICKS) {
-        light_state = next_green_state;
-        phase_ticks = 0;
     } else if (light_state == EW_GREEN) {
         int ns_load = queue_n + queue_s;
         int ew_load = queue_w + queue_e;
@@ -742,8 +740,51 @@ void update_lights_auto(void) {
             next_green_state = NS_GREEN;
             phase_ticks = 0;
         }
+    }
+}
+
+void update_light_transition(void) {
+    phase_ticks++;
+    if (light_state == NS_YELLOW && phase_ticks >= NS_YELLOW_TICKS) {
+        light_state = ALL_RED;
+        phase_ticks = 0;
     } else if (light_state == EW_YELLOW && phase_ticks >= EW_YELLOW_TICKS) {
         light_state = ALL_RED;
+        phase_ticks = 0;
+    } else if (light_state == ALL_RED && next_green_state != ALL_RED && phase_ticks >= ALL_RED_TICKS) {
+        light_state = next_green_state;
+        phase_ticks = 0;
+    }
+}
+
+void request_light_state(LightState target) {
+    if (target == ALL_RED) {
+        next_green_state = ALL_RED;
+        if (light_state == NS_GREEN) {
+            light_state = NS_YELLOW;
+            phase_ticks = 0;
+        } else if (light_state == EW_GREEN) {
+            light_state = EW_YELLOW;
+            phase_ticks = 0;
+        } else if (light_state == ALL_RED) {
+            phase_ticks = 0;
+        }
+        return;
+    }
+
+    next_green_state = target;
+    if (light_state == target) {
+        return;
+    }
+
+    if (light_state == NS_GREEN && target == EW_GREEN) {
+        light_state = NS_YELLOW;
+        phase_ticks = 0;
+    } else if (light_state == EW_GREEN && target == NS_GREEN) {
+        light_state = EW_YELLOW;
+        phase_ticks = 0;
+    } else if (light_state == ALL_RED) {
+        light_state = target;
         phase_ticks = 0;
     }
 }
@@ -1072,7 +1113,9 @@ int main(void) {
                     draw_game_over();
                     continue;
                 }
-                if (mode == AUTO_MODE) {
+                if (light_state == NS_YELLOW || light_state == EW_YELLOW || light_state == ALL_RED) {
+                    update_light_transition();
+                } else if (mode == AUTO_MODE) {
                     update_lights_auto();
                 }
                 if (elapsed_ticks >= ROUND_TICKS) {
@@ -1120,19 +1163,15 @@ int main(void) {
                     draw_paused();
                 } else if (key == 0x16) {   // '1'
                     mode = MANUAL_MODE;
-                    light_state = NS_GREEN;
-                    phase_ticks = 0;
+                    request_light_state(NS_GREEN);
                     redraw_all();
                 } else if (key == 0x1E) {   // '2'
                     mode = MANUAL_MODE;
-                    light_state = EW_GREEN;
-                    next_green_state = EW_GREEN;
-                    phase_ticks = 0;
+                    request_light_state(EW_GREEN);
                     redraw_all();
                 } else if (key == 0x26) {   // '3'
                     mode = MANUAL_MODE;
-                    light_state = ALL_RED;
-                    phase_ticks = 0;
+                    request_light_state(ALL_RED);
                     redraw_all();
                 } else if (key == 0x1C) {   // 'A'
                     mode = (mode == AUTO_MODE) ? MANUAL_MODE : AUTO_MODE;
