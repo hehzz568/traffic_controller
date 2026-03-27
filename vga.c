@@ -3,6 +3,8 @@
 
 #define PS2_BASE            0xFF200100
 #define TIMER1_BASE         0xFF202000
+#define HEX3_HEX0_BASE      0xFF200020
+#define HEX5_HEX4_BASE      0xFF200030
 #define PIXEL_CTRL_BASE     0xFF203020
 #define PIXEL_BUF_BASE      0x08000000
 
@@ -44,9 +46,9 @@
 
 #define TICK_COUNTS 5000000U
 #define NS_GREEN_TICKS 22
-#define NS_YELLOW_TICKS 6
+#define NS_YELLOW_TICKS 20
 #define EW_GREEN_TICKS 22
-#define EW_YELLOW_TICKS 6
+#define EW_YELLOW_TICKS 20
 #define ALL_RED_TICKS 4
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
@@ -98,6 +100,8 @@ typedef struct {
 
 volatile int *ps2_ptr   = (int *)PS2_BASE;
 volatile int *timer_ptr = (int *)TIMER1_BASE;
+volatile int *hex30_ptr = (int *)HEX3_HEX0_BASE;
+volatile int *hex54_ptr = (int *)HEX5_HEX4_BASE;
 volatile int *pixel_ctrl_ptr = (int *)PIXEL_CTRL_BASE;
 volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
 #define BACK_BUF_BASE 0x02000000
@@ -125,6 +129,7 @@ static int queue_e = 0;
 static LightState next_green_state = NS_GREEN;
 
 void clear_screen(short color);
+void update_hex_timer(void);
 
 void wait_for_vsync(void) {
     *pixel_ctrl_ptr = 1;
@@ -452,6 +457,7 @@ void reset_round(void) {
         cars[i].active = false;
         cars[i].scored = false;
     }
+    update_hex_timer();
 }
 
 int spawn_chance_percent(void) {
@@ -575,6 +581,39 @@ int wait_seconds_total(void) {
     return wait_ticks_total / WAIT_DISPLAY_DIVISOR;
 }
 
+int remaining_round_seconds(void) {
+    int remaining_ticks = ROUND_TICKS - elapsed_ticks;
+    if (remaining_ticks < 0) {
+        remaining_ticks = 0;
+    }
+    return (remaining_ticks + 19) / 20;
+}
+
+int hex_digit_pattern(int digit) {
+    static const int patterns[10] = {
+        0x3F, 0x06, 0x5B, 0x4F, 0x66,
+        0x6D, 0x7D, 0x07, 0x7F, 0x6F
+    };
+    if (digit < 0 || digit > 9) {
+        return 0x00;
+    }
+    return patterns[digit];
+}
+
+void update_hex_timer(void) {
+    int total_seconds = remaining_round_seconds();
+    int minutes = total_seconds / 60;
+    int seconds = total_seconds % 60;
+
+    int hex0 = hex_digit_pattern(seconds % 10);
+    int hex1 = hex_digit_pattern((seconds / 10) % 10);
+    int hex2 = hex_digit_pattern(minutes % 10);
+    int hex3 = hex_digit_pattern((minutes / 10) % 10);
+
+    *hex30_ptr = hex0 | (hex1 << 8) | (hex2 << 16) | (hex3 << 24);
+    *hex54_ptr = 0;
+}
+
 bool blocked_by_leader(const Car *car, int nx, int ny) {
     for (int i = 0; i < MAX_CARS; i++) {
         if (!cars[i].active || &cars[i] == car || cars[i].dir != car->dir) {
@@ -587,6 +626,49 @@ bool blocked_by_leader(const Car *car, int nx, int ny) {
         if (car->dir == DIR_EAST  && cars[i].x < car->x && nx - cars[i].x < 16) return true;
     }
     return false;
+}
+
+const char *light_state_label(void) {
+    switch (light_state) {
+        case NS_GREEN:  return "NS G";
+        case NS_YELLOW: return "NS Y";
+        case ALL_RED:   return "ALL R";
+        case EW_GREEN:  return "EW G";
+        case EW_YELLOW: return "EW Y";
+        default:        return "ALL R";
+    }
+}
+
+int phase_countdown_ticks(void) {
+    int remaining = 0;
+    switch (light_state) {
+        case NS_GREEN:
+            remaining = NS_GREEN_TICKS - phase_ticks;
+            break;
+        case NS_YELLOW:
+            remaining = NS_YELLOW_TICKS - phase_ticks;
+            break;
+        case ALL_RED:
+            remaining = ALL_RED_TICKS - phase_ticks;
+            break;
+        case EW_GREEN:
+            remaining = EW_GREEN_TICKS - phase_ticks;
+            break;
+        case EW_YELLOW:
+            remaining = EW_YELLOW_TICKS - phase_ticks;
+            break;
+        default:
+            remaining = 0;
+            break;
+    }
+    if (remaining < 0) {
+        remaining = 0;
+    }
+    return remaining;
+}
+
+int phase_countdown_tenths(void) {
+    return phase_countdown_ticks() / 2;
 }
 
 void update_cars(void) {
@@ -609,7 +691,7 @@ void update_cars(void) {
         }
 
         if (stopped_by_light || blocked_by_leader(&cars[i], nx, ny) ||
-            conflict_zone_blocked(&cars[i], nx, ny)) {
+            (mode == AUTO_MODE && conflict_zone_blocked(&cars[i], nx, ny))) {
             wait_ticks_total++;
             continue;
         }
@@ -825,28 +907,33 @@ void draw_cars(void) {
 void draw_hud(void) {
     int time_left = (ROUND_TICKS - elapsed_ticks) / 10;
     int wait_seconds = wait_seconds_total();
+    int phase_cd = phase_countdown_tenths();
     if (time_left < 0) time_left = 0;
     draw_text(6, 6, "SCORE", WHITE, 1);
     draw_int(40, 6, score, YELLOW, 1);
     draw_text(92, 6, "PASS", WHITE, 1);
     draw_int(120, 6, passed, GREEN, 1);
-    draw_text(168, 6, "WAIT", WHITE, 1);
-    draw_int(196, 6, wait_seconds, ORANGE, 1);
-    draw_text(248, 6, "TIME", WHITE, 1);
-    draw_int(278, 6, time_left, CYAN, 1);
+    draw_text(154, 6, "WAIT", WHITE, 1);
+    draw_int(182, 6, wait_seconds, ORANGE, 1);
+    draw_text(214, 6, "TIME", WHITE, 1);
+    draw_int(244, 6, time_left, CYAN, 1);
+    draw_text(274, 6, "CD", WHITE, 1);
+    draw_int(296, 6, phase_cd, MAGENTA, 1);
 
     draw_text(6, SCREEN_H - 13, "MODE", WHITE, 1);
     draw_text(36, SCREEN_H - 13, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
-    draw_text(92, SCREEN_H - 13, "BEST", WHITE, 1);
-    draw_int(120, SCREEN_H - 13, best_score, MAGENTA, 1);
-    draw_text(172, SCREEN_H - 13, "N", WHITE, 1);
-    draw_int(180, SCREEN_H - 13, queue_n, CYAN, 1);
-    draw_text(196, SCREEN_H - 13, "S", WHITE, 1);
-    draw_int(204, SCREEN_H - 13, queue_s, CYAN, 1);
-    draw_text(220, SCREEN_H - 13, "W", WHITE, 1);
-    draw_int(228, SCREEN_H - 13, queue_w, CYAN, 1);
-    draw_text(244, SCREEN_H - 13, "E", WHITE, 1);
-    draw_int(252, SCREEN_H - 13, queue_e, CYAN, 1);
+    draw_text(92, SCREEN_H - 13, "PH", WHITE, 1);
+    draw_text(110, SCREEN_H - 13, light_state_label(), YELLOW, 1);
+    draw_text(152, SCREEN_H - 13, "BEST", WHITE, 1);
+    draw_int(180, SCREEN_H - 13, best_score, MAGENTA, 1);
+    draw_text(214, SCREEN_H - 13, "N", WHITE, 1);
+    draw_int(222, SCREEN_H - 13, queue_n, CYAN, 1);
+    draw_text(238, SCREEN_H - 13, "S", WHITE, 1);
+    draw_int(246, SCREEN_H - 13, queue_s, CYAN, 1);
+    draw_text(262, SCREEN_H - 13, "W", WHITE, 1);
+    draw_int(270, SCREEN_H - 13, queue_w, CYAN, 1);
+    draw_text(286, SCREEN_H - 13, "E", WHITE, 1);
+    draw_int(294, SCREEN_H - 13, queue_e, CYAN, 1);
 }
 
 void redraw_all(void) {
@@ -958,11 +1045,13 @@ int main(void) {
 
     reset_round();
     scene = SCENE_TITLE;
+    update_hex_timer();
 
     draw_title();
 
     while (1) {
         if (timer_expired()) {
+            update_hex_timer();
             blink_ticks++;
             if (blink_ticks >= 2) {
                 blink_ticks = 0;
