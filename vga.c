@@ -1101,16 +1101,20 @@ int main(void) {
     while (1) {
         if (timer_expired()) {
             update_hex_timer();
+            bool blink_changed = false;
             blink_ticks++;
             if (blink_ticks >= 2) {
                 blink_ticks = 0;
                 blink_on = !blink_on;
+                blink_changed = true;
             }
 
+            /* Title: redraw only when blink toggles (PRESS SPACE hint). Redrawing
+             * the full screen every tick + vsync swap made static text flicker. */
             if (scene == SCENE_TITLE) {
-                draw_title();
+                if (blink_changed) draw_title();
             } else if (scene == SCENE_INSTRUCTIONS) {
-                draw_instructions();
+                /* Static page; redraw only on scene entry (key handler). */
             } else if (scene == SCENE_PLAYING) {
                 elapsed_ticks++;
                 maybe_spawn_car();
@@ -1134,9 +1138,9 @@ int main(void) {
                     redraw_all();
                 }
             } else if (scene == SCENE_PAUSED) {
-                draw_paused();
+                /* Static overlay; redraw only when pausing (key handler). */
             } else if (scene == SCENE_GAME_OVER) {
-                draw_game_over();
+                /* Static; redraw only on transition to game over (key handler). */
             }
         }
 
