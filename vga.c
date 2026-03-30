@@ -1009,40 +1009,42 @@ void draw_static_scene(SceneRenderer renderer) {
 }
 
 void draw_title_scene(void) {
-    draw_intersection_base();
-    draw_lights();
+    clear_screen(0x18C3);
 
-    Car sample_north = { true, DIR_NORTH, 146, 44, false, ORANGE };
-    Car sample_south = { true, DIR_SOUTH, 166, 182, false, CYAN };
-    Car sample_west  = { true, DIR_WEST, 54, 126, false, RED };
-    Car sample_east  = { true, DIR_EAST, 254, 106, false, GREEN };
+    draw_box(10, 10, 309, 229, BLACK);
+    draw_box(14, 14, 305, 225, DARKGRAY);
+    draw_box(18, 18, 301, 221, CITY_BG);
 
-    draw_vehicle_sprite(&sample_north);
-    draw_vehicle_sprite(&sample_south);
-    draw_vehicle_sprite(&sample_west);
-    draw_vehicle_sprite(&sample_east);
+    draw_box(18, 18, 301, 24, ROAD_EDGE);
+    draw_box(18, 215, 301, 221, ROAD_EDGE);
 
-    draw_box(32, 24, 287, 84, BLACK);
-    draw_box(36, 28, 283, 80, DARKGRAY);
-    draw_box(36, 28, 283, 34, ROAD_EDGE);
-    draw_text_centered(38, "TRAFFIC CONTROL", YELLOW, 2);
-    draw_text_centered(60, "DE1 SOC VGA GAME", WHITE, 1);
+    draw_box(34, 116, 285, 140, ROAD);
+    draw_box(34, 116, 285, 120, SIDEWALK);
+    draw_box(34, 136, 285, 140, SIDEWALK);
+    for (int x = 52; x <= 250; x += 28) {
+        draw_box(x, 126, x + 11, 129, WHITE);
+    }
 
-    draw_box(18, 98, 104, 136, BLACK);
-    draw_box(22, 102, 100, 132, DARKGRAY);
-    draw_text(34, 110, "NO", CYAN, 1);
-    draw_text(34, 122, "CRASH", WHITE, 1);
+    draw_box(52, 40, 267, 102, BLACK);
+    draw_box(56, 44, 263, 98, DARKGRAY);
+    draw_box(56, 44, 263, 48, ROAD_EDGE);
+    draw_box(56, 94, 263, 98, ROAD_EDGE);
+    draw_text_centered(58, "TRAFFIC CONTROL", YELLOW, 2);
 
-    draw_box(216, 98, 302, 136, BLACK);
-    draw_box(220, 102, 298, 132, DARKGRAY);
-    draw_text(232, 110, "KEEP", CYAN, 1);
-    draw_text(232, 122, "FLOW", WHITE, 1);
+    draw_light_vertical(28, 52, RED, DARKYELLOW, DARKGREEN);
+    draw_light_vertical(280, 52, DARKRED, YELLOW, DARKGREEN);
+    draw_box(33, 88, 35, 116, BLACK);
+    draw_box(285, 88, 287, 116, BLACK);
 
-    draw_box(28, 178, 291, 224, BLACK);
-    draw_box(32, 182, 287, 220, DARKGRAY);
-    draw_text_centered(188, "SPACE START", GREEN, 2);
-    draw_text_centered(206, "I INFO PAGE   P PAUSE", WHITE, 1);
-    draw_text_centered(218, "A AUTO MANUAL   1 2 3 LIGHTS", CYAN, 1);
+    draw_box(56, 156, 263, 202, BLACK);
+    draw_box(60, 160, 259, 198, DARKGRAY);
+    draw_box(60, 160, 259, 164, DARKGREEN);
+    draw_text_centered(168, "PRESS SPACE", GREEN, 2);
+    draw_text_centered(184, "TO START", WHITE, 2);
+
+    draw_box(88, 206, 231, 222, BLACK);
+    draw_box(92, 210, 227, 218, DARKGRAY);
+    draw_text_centered(211, "I - INFO PAGE", CYAN, 1);
 }
 
 void draw_title(void) {
