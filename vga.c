@@ -98,6 +98,8 @@ typedef struct {
     short color;
 } Car;
 
+typedef void (*SceneRenderer)(void);
+
 volatile int *ps2_ptr   = (int *)PS2_BASE;
 volatile int *timer_ptr = (int *)TIMER1_BASE;
 volatile int *hex30_ptr = (int *)HEX3_HEX0_BASE;
@@ -128,6 +130,11 @@ static LightState next_green_state = NS_GREEN;
 
 void clear_screen(short color);
 void update_hex_timer(void);
+void draw_static_scene(SceneRenderer renderer);
+void draw_title_scene(void);
+void draw_instructions_scene(void);
+void draw_paused_scene(void);
+void draw_game_over_scene(void);
 
 void wait_for_vsync(void) {
     *pixel_ctrl_ptr = 1;
@@ -189,6 +196,9 @@ int text_len(const char *s) {
 const uint8_t *glyph_for_char(char ch) {
     static const uint8_t blank[7] = {0, 0, 0, 0, 0, 0, 0};
     static const uint8_t dash[7]  = {0, 0, 0, 31, 0, 0, 0};
+    static const uint8_t plus[7]  = {0, 4, 4, 31, 4, 4, 0};
+    static const uint8_t equal[7] = {0, 31, 0, 31, 0, 0, 0};
+    static const uint8_t slash[7] = {1, 2, 4, 8, 16, 0, 0};
     static const uint8_t colon[7] = {0, 4, 0, 0, 4, 0, 0};
     static const uint8_t zero[7]  = {14, 17, 19, 21, 25, 17, 14};
     static const uint8_t one[7]   = {4, 12, 4, 4, 4, 4, 14};
@@ -237,7 +247,8 @@ const uint8_t *glyph_for_char(char ch) {
         case '0': return zero; case '1': return one; case '2': return two; case '3': return three;
         case '4': return four; case '5': return five; case '6': return six; case '7': return seven;
         case '8': return eight; case '9': return nine;
-        case '-': return dash; case ':': return colon; case ' ': return blank;
+        case '-': return dash; case '+': return plus; case '=': return equal;
+        case '/': return slash; case ':': return colon; case ' ': return blank;
         default:  return blank;
     }
 }
@@ -991,25 +1002,54 @@ void redraw_all(void) {
     present_frame();
 }
 
-void draw_title(void) {
-    clear_screen(CITY_BG);
-    draw_box(14, 14, 98, 226, BUILDING);
-    draw_box(222, 14, 306, 226, BUILDING);
-    draw_box(26, 20, 293, 220, ROAD);
-    draw_box(32, 26, 287, 214, DARKGRAY);
-
-    draw_text_centered(44, "TRAFFIC CTRL", YELLOW, 3);
-    draw_text_centered(78, "DE1 SOC VGA GAME", WHITE, 1);
-    draw_text_centered(108, "SPACE START", GREEN, 1);
-    draw_text_centered(126, "I INFO PAGE", WHITE, 1);
-    draw_text_centered(144, "P PAUSE", WHITE, 1);
-    draw_text_centered(162, "A AUTO MANUAL", WHITE, 1);
-    draw_text_centered(180, "1 NS    2 EW", WHITE, 1);
-    draw_text_centered(194, "CRASH LOSE  TIME CLEAR", CYAN, 1);
+void draw_static_scene(SceneRenderer renderer) {
+    renderer();
     present_frame();
+    renderer();
 }
 
-void draw_instructions(void) {
+void draw_title_scene(void) {
+    draw_intersection_base();
+    draw_lights();
+
+    Car sample_north = { true, DIR_NORTH, 146, 44, false, ORANGE };
+    Car sample_south = { true, DIR_SOUTH, 166, 182, false, CYAN };
+    Car sample_west  = { true, DIR_WEST, 54, 126, false, RED };
+    Car sample_east  = { true, DIR_EAST, 254, 106, false, GREEN };
+
+    draw_vehicle_sprite(&sample_north);
+    draw_vehicle_sprite(&sample_south);
+    draw_vehicle_sprite(&sample_west);
+    draw_vehicle_sprite(&sample_east);
+
+    draw_box(32, 24, 287, 84, BLACK);
+    draw_box(36, 28, 283, 80, DARKGRAY);
+    draw_box(36, 28, 283, 34, ROAD_EDGE);
+    draw_text_centered(38, "TRAFFIC CONTROL", YELLOW, 2);
+    draw_text_centered(60, "DE1 SOC VGA GAME", WHITE, 1);
+
+    draw_box(18, 98, 104, 136, BLACK);
+    draw_box(22, 102, 100, 132, DARKGRAY);
+    draw_text(34, 110, "NO", CYAN, 1);
+    draw_text(34, 122, "CRASH", WHITE, 1);
+
+    draw_box(216, 98, 302, 136, BLACK);
+    draw_box(220, 102, 298, 132, DARKGRAY);
+    draw_text(232, 110, "KEEP", CYAN, 1);
+    draw_text(232, 122, "FLOW", WHITE, 1);
+
+    draw_box(28, 178, 291, 224, BLACK);
+    draw_box(32, 182, 287, 220, DARKGRAY);
+    draw_text_centered(188, "SPACE START", GREEN, 2);
+    draw_text_centered(206, "I INFO PAGE   P PAUSE", WHITE, 1);
+    draw_text_centered(218, "A AUTO MANUAL   1 2 3 LIGHTS", CYAN, 1);
+}
+
+void draw_title(void) {
+    draw_static_scene(draw_title_scene);
+}
+
+void draw_instructions_scene(void) {
     clear_screen(CITY_BG);
     draw_box(18, 14, 301, 225, BLACK);
     draw_box(24, 20, 295, 219, DARKGRAY);
@@ -1036,21 +1076,29 @@ void draw_instructions(void) {
     draw_text(88, 214, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
 
     draw_text_centered(226, "SPACE PLAY   S BACK", MAGENTA, 1);
-    present_frame();
+}
+
+void draw_instructions(void) {
+    draw_static_scene(draw_instructions_scene);
+}
+
+void draw_paused_scene(void) {
+    draw_intersection_base();
+    draw_lights();
+    draw_cars();
+    draw_hud();
+    draw_box(64, 88, 255, 154, BLACK);
+    draw_box(68, 92, 251, 150, DARKGRAY);
+    draw_text_centered(104, "PAUSED", YELLOW, 2);
+    draw_text_centered(126, "SPACE OR P RESUME", WHITE, 1);
+    draw_text_centered(140, "S TITLE", WHITE, 1);
 }
 
 void draw_paused(void) {
-    draw_intersection_base();
-    draw_lights();
-    draw_box(74, 92, 245, 150, BLACK);
-    draw_box(78, 96, 241, 146, DARKGRAY);
-    draw_text_centered(108, "PAUSED", YELLOW, 2);
-    draw_text_centered(126, "SPACE - RESUME", WHITE, 1);
-    draw_text_centered(140, "S - TITLE", WHITE, 1);
-    present_frame();
+    draw_static_scene(draw_paused_scene);
 }
 
-void draw_game_over(void) {
+void draw_game_over_scene(void) {
     clear_screen(CITY_BG);
     draw_box(36, 28, 283, 212, BLACK);
     draw_box(42, 34, 277, 206, DARKGRAY);
@@ -1073,7 +1121,10 @@ void draw_game_over(void) {
     draw_text_centered(178, "WAIT SEC / 2", WHITE, 1);
     draw_text_centered(190, "SPACE RETRY", MAGENTA, 1);
     draw_text_centered(200, "S TITLE", MAGENTA, 1);
-    present_frame();
+}
+
+void draw_game_over(void) {
+    draw_static_scene(draw_game_over_scene);
 }
 
 // Main controls:
