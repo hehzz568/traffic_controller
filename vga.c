@@ -12,6 +12,8 @@
 #define SCREEN_W 320
 #define SCREEN_H 240
 
+//sn
+
 // Colors
 #define BLACK      0x0000
 #define WHITE      0xFFFF
