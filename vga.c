@@ -12,8 +12,6 @@
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-//sn
-
 // Colors
 #define BLACK      0x0000
 #define WHITE      0xFFFF
@@ -1008,8 +1006,6 @@ void draw_title(void) {
     draw_text_centered(162, "A AUTO MANUAL", WHITE, 1);
     draw_text_centered(180, "1 NS    2 EW", WHITE, 1);
     draw_text_centered(194, "CRASH LOSE  TIME CLEAR", CYAN, 1);
-
-    draw_text_centered(206, "PRESS SPACE", RED, 1);
     present_frame();
 }
 
@@ -1100,13 +1096,10 @@ int main(void) {
         if (timer_expired()) {
             update_hex_timer();
 
-            /* Double-buffered VGA: refresh the draw buffer every tick before swap, or
-             * the other framebuffer stays stale and the display can flicker badly. */
-            if (scene == SCENE_TITLE) {
-                draw_title();
-            } else if (scene == SCENE_INSTRUCTIONS) {
-                draw_instructions();
-            } else if (scene == SCENE_PLAYING) {
+            /* Static scenes are drawn only when the scene changes. Repainting title /
+             * pause / game-over every tick causes repeated clear+swap cycles that
+             * show up as shimmer on text pixels. */
+            if (scene == SCENE_PLAYING) {
                 elapsed_ticks++;
                 maybe_spawn_car();
                 update_cars();
@@ -1128,10 +1121,6 @@ int main(void) {
                 } else {
                     redraw_all();
                 }
-            } else if (scene == SCENE_PAUSED) {
-                draw_paused();
-            } else if (scene == SCENE_GAME_OVER) {
-                draw_game_over();
             }
         }
 
