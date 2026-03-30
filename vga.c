@@ -109,8 +109,6 @@ volatile short *pixel_buffer = (short *)PIXEL_BUF_BASE;
 static LightState light_state = NS_GREEN;
 static ControlMode mode = AUTO_MODE;
 static Scene scene = SCENE_TITLE;
-static bool blink_on = true;
-static int blink_ticks = 0;
 static int phase_ticks = 0;
 static uint32_t rng_state = 0x2432026u;
 static Car cars[MAX_CARS];
@@ -1009,9 +1007,7 @@ void draw_title(void) {
     draw_text_centered(180, "1 NS    2 EW", WHITE, 1);
     draw_text_centered(194, "CRASH LOSE  TIME CLEAR", CYAN, 1);
 
-    if (blink_on) {
-        draw_text_centered(206, "PRESS SPACE", RED, 1);
-    }
+    draw_text_centered(206, "PRESS SPACE", RED, 1);
     present_frame();
 }
 
@@ -1101,20 +1097,13 @@ int main(void) {
     while (1) {
         if (timer_expired()) {
             update_hex_timer();
-            bool blink_changed = false;
-            blink_ticks++;
-            if (blink_ticks >= 2) {
-                blink_ticks = 0;
-                blink_on = !blink_on;
-                blink_changed = true;
-            }
 
-            /* Title: redraw only when blink toggles (PRESS SPACE hint). Redrawing
-             * the full screen every tick + vsync swap made static text flicker. */
+            /* Double-buffered VGA: refresh the draw buffer every tick before swap, or
+             * the other framebuffer stays stale and the display can flicker badly. */
             if (scene == SCENE_TITLE) {
-                if (blink_changed) draw_title();
+                draw_title();
             } else if (scene == SCENE_INSTRUCTIONS) {
-                /* Static page; redraw only on scene entry (key handler). */
+                draw_instructions();
             } else if (scene == SCENE_PLAYING) {
                 elapsed_ticks++;
                 maybe_spawn_car();
@@ -1138,9 +1127,9 @@ int main(void) {
                     redraw_all();
                 }
             } else if (scene == SCENE_PAUSED) {
-                /* Static overlay; redraw only when pausing (key handler). */
+                draw_paused();
             } else if (scene == SCENE_GAME_OVER) {
-                /* Static; redraw only on transition to game over (key handler). */
+                draw_game_over();
             }
         }
 
