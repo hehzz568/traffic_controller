@@ -28,6 +28,7 @@
 #define DARKGREEN  0x0400
 #define DARKYELLOW 0x8400
 #define CITY_BG    0x2104
+#define MENU_BG    0x18C3
 #define SIDEWALK   0xBDF7
 #define ROAD_EDGE  0x6B4D
 #define BUILDING   0x52AA
@@ -199,6 +200,7 @@ const uint8_t *glyph_for_char(char ch) {
     static const uint8_t plus[7]  = {0, 4, 4, 31, 4, 4, 0};
     static const uint8_t equal[7] = {0, 31, 0, 31, 0, 0, 0};
     static const uint8_t slash[7] = {1, 2, 4, 8, 16, 0, 0};
+    static const uint8_t amp[7]   = {12, 18, 20, 8, 21, 18, 13};
     static const uint8_t colon[7] = {0, 4, 0, 0, 4, 0, 0};
     static const uint8_t zero[7]  = {14, 17, 19, 21, 25, 17, 14};
     static const uint8_t one[7]   = {4, 12, 4, 4, 4, 4, 14};
@@ -248,6 +250,7 @@ const uint8_t *glyph_for_char(char ch) {
         case '4': return four; case '5': return five; case '6': return six; case '7': return seven;
         case '8': return eight; case '9': return nine;
         case '-': return dash; case '+': return plus; case '=': return equal;
+        case '&': return amp;
         case '/': return slash; case ':': return colon; case ' ': return blank;
         default:  return blank;
     }
@@ -277,8 +280,13 @@ void draw_text_centered(int y, const char *text, short color, int scale) {
     draw_text(x, y, text, color, scale);
 }
 
-void draw_int(int x, int y, int value, short color, int scale) {
-    char buf[12];
+void draw_text_in_box(int x1, int x2, int y, const char *text, short color, int scale) {
+    int width = text_len(text) * scale * 6 - scale;
+    int x = x1 + ((x2 - x1 + 1) - width) / 2;
+    draw_text(x, y, text, color, scale);
+}
+
+void format_int_text(int value, char *buf) {
     int idx = 0;
     if (value == 0) {
         buf[idx++] = '0';
@@ -299,32 +307,24 @@ void draw_int(int x, int y, int value, short color, int scale) {
         buf[idx - 1 - i] = t;
     }
     buf[idx] = '\0';
+}
+
+void draw_int(int x, int y, int value, short color, int scale) {
+    char buf[12];
+    format_int_text(value, buf);
     draw_text(x, y, buf, color, scale);
 }
 
 void draw_int_centered(int y, int value, short color, int scale) {
     char buf[12];
-    int idx = 0;
-    if (value == 0) {
-        buf[idx++] = '0';
-    } else {
-        int v = value;
-        if (v < 0) v = -v;
-        while (v > 0 && idx < 10) {
-            buf[idx++] = (char)('0' + (v % 10));
-            v /= 10;
-        }
-        if (value < 0 && idx < 11) {
-            buf[idx++] = '-';
-        }
-    }
-    for (int i = 0; i < idx / 2; i++) {
-        char t = buf[i];
-        buf[i] = buf[idx - 1 - i];
-        buf[idx - 1 - i] = t;
-    }
-    buf[idx] = '\0';
+    format_int_text(value, buf);
     draw_text_centered(y, buf, color, scale);
+}
+
+void draw_int_in_box(int x1, int x2, int y, int value, short color, int scale) {
+    char buf[12];
+    format_int_text(value, buf);
+    draw_text_in_box(x1, x2, y, buf, color, scale);
 }
 
 // Timer helpers w/ 100 MHz clock
@@ -1002,6 +1002,21 @@ void redraw_all(void) {
     present_frame();
 }
 
+void draw_page_frame(short fill) {
+    clear_screen(MENU_BG);
+    draw_box(10, 10, 309, 229, BLACK);
+    draw_box(14, 14, 305, 225, DARKGRAY);
+    draw_box(18, 18, 301, 221, fill);
+    draw_box(18, 18, 301, 24, ROAD_EDGE);
+    draw_box(18, 215, 301, 221, ROAD_EDGE);
+}
+
+void draw_panel(int x1, int y1, int x2, int y2, short fill, short accent) {
+    draw_box(x1, y1, x2, y2, BLACK);
+    draw_box(x1 + 4, y1 + 4, x2 - 4, y2 - 4, fill);
+    draw_box(x1 + 4, y1 + 4, x2 - 4, y1 + 8, accent);
+}
+
 void draw_static_scene(SceneRenderer renderer) {
     renderer();
     present_frame();
@@ -1009,42 +1024,30 @@ void draw_static_scene(SceneRenderer renderer) {
 }
 
 void draw_title_scene(void) {
-    clear_screen(0x18C3);
+    draw_page_frame(CITY_BG);
 
-    draw_box(10, 10, 309, 229, BLACK);
-    draw_box(14, 14, 305, 225, DARKGRAY);
-    draw_box(18, 18, 301, 221, CITY_BG);
+    draw_panel(44, 36, 275, 100, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(48, 271, 52, "TRAFFIC CONTROL", YELLOW, 2);
+    draw_text_in_box(48, 271, 78, "BY ALAN HE & HARRY ZHANG", WHITE, 1);
 
-    draw_box(18, 18, 301, 24, ROAD_EDGE);
-    draw_box(18, 215, 301, 221, ROAD_EDGE);
-
-    draw_box(34, 116, 285, 140, ROAD);
-    draw_box(34, 116, 285, 120, SIDEWALK);
-    draw_box(34, 136, 285, 140, SIDEWALK);
-    for (int x = 52; x <= 250; x += 28) {
-        draw_box(x, 126, x + 11, 129, WHITE);
+    draw_box(36, 116, 283, 144, ROAD);
+    draw_box(36, 116, 283, 120, SIDEWALK);
+    draw_box(36, 140, 283, 144, SIDEWALK);
+    for (int x = 56; x <= 248; x += 30) {
+        draw_box(x, 127, x + 11, 130, WHITE);
     }
 
-    draw_box(52, 40, 267, 102, BLACK);
-    draw_box(56, 44, 263, 98, DARKGRAY);
-    draw_box(56, 44, 263, 48, ROAD_EDGE);
-    draw_box(56, 94, 263, 98, ROAD_EDGE);
-    draw_text_centered(58, "TRAFFIC CONTROL", YELLOW, 2);
+    draw_light_vertical(24, 54, RED, DARKYELLOW, DARKGREEN);
+    draw_light_vertical(284, 54, DARKRED, YELLOW, DARKGREEN);
+    draw_box(29, 90, 31, 116, BLACK);
+    draw_box(289, 90, 291, 116, BLACK);
 
-    draw_light_vertical(28, 52, RED, DARKYELLOW, DARKGREEN);
-    draw_light_vertical(280, 52, DARKRED, YELLOW, DARKGREEN);
-    draw_box(33, 88, 35, 116, BLACK);
-    draw_box(285, 88, 287, 116, BLACK);
+    draw_panel(54, 160, 265, 206, DARKGRAY, DARKGREEN);
+    draw_text_in_box(58, 261, 170, "PRESS SPACE", GREEN, 2);
+    draw_text_in_box(58, 261, 188, "TO START", WHITE, 2);
 
-    draw_box(56, 156, 263, 202, BLACK);
-    draw_box(60, 160, 259, 198, DARKGRAY);
-    draw_box(60, 160, 259, 164, DARKGREEN);
-    draw_text_centered(168, "PRESS SPACE", GREEN, 2);
-    draw_text_centered(184, "TO START", WHITE, 2);
-
-    draw_box(88, 206, 231, 222, BLACK);
-    draw_box(92, 210, 227, 218, DARKGRAY);
-    draw_text_centered(211, "I - INFO PAGE", CYAN, 1);
+    draw_panel(86, 200, 233, 222, DARKGRAY, CYAN);
+    draw_text_in_box(90, 229, 212, "I - INFO PAGE", CYAN, 1);
 }
 
 void draw_title(void) {
@@ -1052,32 +1055,34 @@ void draw_title(void) {
 }
 
 void draw_instructions_scene(void) {
-    clear_screen(CITY_BG);
-    draw_box(18, 14, 301, 225, BLACK);
-    draw_box(24, 20, 295, 219, DARKGRAY);
+    draw_page_frame(CITY_BG);
 
-    draw_text_centered(30, "HOW TO PLAY", YELLOW, 2);
+    draw_panel(52, 34, 267, 82, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(56, 263, 48, "HOW TO PLAY", YELLOW, 2);
 
-    draw_text(34, 62, "GOAL", CYAN, 1);
-    draw_text(88, 62, "MOVE CARS WITHOUT A CRASH", WHITE, 1);
+    draw_panel(34, 92, 285, 128, DARKGRAY, CYAN);
+    draw_text(48, 104, "GOAL", CYAN, 1);
+    draw_text(96, 104, "KEEP TRAFFIC MOVING", WHITE, 1);
+    draw_text(96, 116, "AVOID ALL CRASHES", WHITE, 1);
 
-    draw_text(34, 84, "SCORE", CYAN, 1);
-    draw_text(88, 84, "PASS +25", WHITE, 1);
-    draw_text(88, 98, "WAIT SHOWS TOTAL SECONDS", WHITE, 1);
-    draw_text(88, 112, "SCORE PENALTY = WAIT SEC / 2", WHITE, 1);
-    draw_text(88, 126, "AUTO MODE FOLLOWS QUEUE LOAD", WHITE, 1);
+    draw_panel(34, 138, 152, 194, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(38, 148, 148, "MAIN KEYS", CYAN, 1);
+    draw_text_in_box(38, 148, 158, "SPACE START", WHITE, 1);
+    draw_text_in_box(38, 148, 168, "A AUTO MANUAL", WHITE, 1);
+    draw_text_in_box(38, 148, 178, "1 NS GREEN", WHITE, 1);
+    draw_text_in_box(38, 148, 188, "3 ALL RED", WHITE, 1);
 
-    draw_text(34, 144, "KEYS", CYAN, 1);
-    draw_text(88, 144, "SPACE START OR PAUSE", WHITE, 1);
-    draw_text(88, 158, "A TOGGLE AUTO MANUAL", WHITE, 1);
-    draw_text(88, 172, "1 NS GREEN   2 EW GREEN", WHITE, 1);
-    draw_text(88, 186, "3 ALL RED    R RESTART", WHITE, 1);
-    draw_text(88, 200, "S TITLE", WHITE, 1);
+    draw_panel(168, 138, 286, 194, DARKGRAY, CYAN);
+    draw_text_in_box(172, 282, 148, "MORE KEYS", CYAN, 1);
+    draw_text_in_box(172, 282, 158, "P PAUSE", WHITE, 1);
+    draw_text_in_box(172, 282, 168, "R RESTART", WHITE, 1);
+    draw_text_in_box(172, 282, 178, "2 EW GREEN", WHITE, 1);
+    draw_text_in_box(172, 282, 188, "S TITLE", WHITE, 1);
 
-    draw_text(34, 214, "END", CYAN, 1);
-    draw_text(88, 214, "CRASH OUT OR ROUND CLEAR", WHITE, 1);
-
-    draw_text_centered(226, "SPACE PLAY   S BACK", MAGENTA, 1);
+    draw_panel(48, 198, 154, 218, DARKGRAY, DARKGREEN);
+    draw_panel(166, 198, 272, 218, DARKGRAY, MAGENTA);
+    draw_text_in_box(52, 150, 208, "SPACE PLAY", WHITE, 1);
+    draw_text_in_box(170, 268, 208, "S BACK", WHITE, 1);
 }
 
 void draw_instructions(void) {
@@ -1101,28 +1106,31 @@ void draw_paused(void) {
 }
 
 void draw_game_over_scene(void) {
-    clear_screen(CITY_BG);
-    draw_box(36, 28, 283, 212, BLACK);
-    draw_box(42, 34, 277, 206, DARKGRAY);
+    short accent = (end_reason == END_CRASH) ? RED : GREEN;
+    short sub_color = (end_reason == END_CRASH) ? ORANGE : CYAN;
+
+    draw_page_frame(CITY_BG);
+    draw_panel(50, 34, 269, 92, DARKGRAY, accent);
     if (end_reason == END_CRASH) {
-        draw_text_centered(52, "CRASH OUT", RED, 3);
-        draw_text_centered(84, "YOU LOST BY COLLISION", ORANGE, 1);
+        draw_text_in_box(54, 265, 48, "CRASH OUT", RED, 3);
+        draw_text_in_box(54, 265, 78, "YOU LOST BY COLLISION", sub_color, 1);
     } else {
-        draw_text_centered(52, "ROUND CLEAR", GREEN, 2);
-        draw_text_centered(84, "TIME LIMIT REACHED", CYAN, 1);
+        draw_text_in_box(54, 265, 52, "ROUND CLEAR", GREEN, 2);
+        draw_text_in_box(54, 265, 78, "TIME LIMIT REACHED", sub_color, 1);
     }
-    draw_box(58, 102, 154, 158, ROAD);
-    draw_box(166, 102, 262, 158, ROAD);
-    draw_box(60, 104, 152, 156, CITY_BG);
-    draw_box(168, 104, 260, 156, CITY_BG);
-    draw_text(84, 112, "SCORE", WHITE, 1);
-    draw_int(88, 130, score, YELLOW, 2);
-    draw_text(198, 112, "PASS", WHITE, 1);
-    draw_int(202, 130, passed, GREEN, 2);
-    draw_text_centered(166, "PASS +25", WHITE, 1);
-    draw_text_centered(178, "WAIT SEC / 2", WHITE, 1);
-    draw_text_centered(190, "SPACE RETRY", MAGENTA, 1);
-    draw_text_centered(200, "S TITLE", MAGENTA, 1);
+
+    draw_panel(44, 108, 152, 180, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(48, 148, 122, "SCORE", WHITE, 1);
+    draw_int_in_box(48, 148, 146, score, YELLOW, 2);
+
+    draw_panel(168, 108, 276, 180, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(172, 272, 122, "PASS", WHITE, 1);
+    draw_int_in_box(172, 272, 146, passed, GREEN, 2);
+
+    draw_panel(48, 194, 154, 216, DARKGRAY, MAGENTA);
+    draw_panel(166, 194, 272, 216, DARKGRAY, CYAN);
+    draw_text_in_box(52, 150, 204, "SPACE RETRY", WHITE, 1);
+    draw_text_in_box(170, 268, 204, "S TITLE", WHITE, 1);
 }
 
 void draw_game_over(void) {
