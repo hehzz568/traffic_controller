@@ -90,6 +90,11 @@ typedef enum {
     DIR_EAST
 } Direction;
 
+typedef enum {
+    RUSH_NS = 0,
+    RUSH_EW
+} RushAxis;
+
 typedef struct {
     bool active;
     Direction dir;
@@ -128,9 +133,17 @@ static int queue_s = 0;
 static int queue_w = 0;
 static int queue_e = 0;
 static LightState next_green_state = NS_GREEN;
+static RushAxis rush_axis = RUSH_NS;
+static int rush_ticks_left = 0;
+static int bonus_score = 0;
+static int flow_streak = 0;
 
 void clear_screen(short color);
 void update_hex_timer(void);
+void draw_page_frame(short fill);
+void draw_panel(int x1, int y1, int x2, int y2, short fill, short accent);
+void draw_compact_button(int x1, int y1, int x2, int y2, short accent);
+void draw_label_strip(int x1, int y1, int x2, int y2, short fill);
 void draw_static_scene(SceneRenderer renderer);
 void draw_title_scene(void);
 void draw_instructions_scene(void);
@@ -400,6 +413,35 @@ short random_car_color(void) {
     return palette[next_rand() % 6u];
 }
 
+const char *rush_axis_label(void) {
+    return (rush_axis == RUSH_NS) ? "NS" : "EW";
+}
+
+short rush_axis_color(void) {
+    return (rush_axis == RUSH_NS) ? GREEN : ORANGE;
+}
+
+bool is_rush_dir(Direction dir) {
+    if (rush_axis == RUSH_NS) {
+        return dir == DIR_NORTH || dir == DIR_SOUTH;
+    }
+    return dir == DIR_WEST || dir == DIR_EAST;
+}
+
+void choose_new_rush_axis(void) {
+    rush_axis = (next_rand() & 1u) ? RUSH_NS : RUSH_EW;
+    rush_ticks_left = 180 + (int)(next_rand() % 120u);
+}
+
+void update_rush_cycle(void) {
+    if (rush_ticks_left > 0) {
+        rush_ticks_left--;
+    }
+    if (rush_ticks_left <= 0) {
+        choose_new_rush_axis();
+    }
+}
+
 bool is_green_for_dir(Direction dir) {
     if (dir == DIR_NORTH || dir == DIR_SOUTH) {
         return light_state == NS_GREEN;
@@ -462,6 +504,9 @@ void reset_round(void) {
     queue_s = 0;
     queue_w = 0;
     queue_e = 0;
+    bonus_score = 0;
+    flow_streak = 0;
+    choose_new_rush_axis();
     for (int i = 0; i < MAX_CARS; i++) {
         cars[i].active = false;
         cars[i].scored = false;
@@ -483,7 +528,19 @@ void maybe_spawn_car(void) {
         return;
     }
 
-    Direction dir = (Direction)(next_rand() % 4u);
+    Direction dir;
+    int roll = (int)(next_rand() % 100u);
+    if (rush_axis == RUSH_NS) {
+        if (roll < 38) dir = DIR_NORTH;
+        else if (roll < 76) dir = DIR_SOUTH;
+        else if (roll < 88) dir = DIR_WEST;
+        else dir = DIR_EAST;
+    } else {
+        if (roll < 38) dir = DIR_WEST;
+        else if (roll < 76) dir = DIR_EAST;
+        else if (roll < 88) dir = DIR_NORTH;
+        else dir = DIR_SOUTH;
+    }
     int sx = 0;
     int sy = 0;
     if (dir == DIR_NORTH) { sx = 146; sy = -CAR_LONG; }
@@ -577,7 +634,7 @@ bool conflict_zone_blocked(const Car *car, int nx, int ny) {
 }
 
 void update_score(void) {
-    score = passed * PASS_SCORE - (wait_ticks_total / WAIT_PENALTY_DIVISOR);
+    score = passed * PASS_SCORE + bonus_score - (wait_ticks_total / WAIT_PENALTY_DIVISOR);
     if (score < 0) {
         score = 0;
     }
@@ -685,6 +742,8 @@ int phase_countdown_tenths(void) {
 }
 
 void update_cars(void) {
+    bool waited_this_tick = false;
+
     for (int i = 0; i < MAX_CARS; i++) {
         if (!cars[i].active) continue;
 
@@ -706,6 +765,7 @@ void update_cars(void) {
         if (stopped_by_light || blocked_by_leader(&cars[i], nx, ny) ||
             (mode == AUTO_MODE && conflict_zone_blocked(&cars[i], nx, ny))) {
             wait_ticks_total++;
+            waited_this_tick = true;
             continue;
         }
 
@@ -715,11 +775,21 @@ void update_cars(void) {
         if (!cars[i].scored && passed_stop_line(&cars[i])) {
             cars[i].scored = true;
             passed++;
+            if (flow_streak < 9) {
+                flow_streak++;
+            }
+            bonus_score += flow_streak * 3;
+            if (is_rush_dir(cars[i].dir)) {
+                bonus_score += 6;
+            }
         }
 
         if (cars[i].x < -24 || cars[i].x > SCREEN_W + 24 || cars[i].y < -24 || cars[i].y > SCREEN_H + 24) {
             cars[i].active = false;
         }
+    }
+    if (waited_this_tick && flow_streak > 0) {
+        flow_streak--;
     }
     update_queue_lengths();
     update_score();
@@ -859,6 +929,22 @@ void draw_intersection_base(void) {
     for (int y = 0; y < SCREEN_H; y += 20) {
         draw_box(159, y, 161, y + 8, WHITE);
     }
+
+    // Crosswalks give the junction a cleaner city look.
+    for (int x = 136; x <= 182; x += 9) {
+        draw_box(x, 84, x + 4, 89, WHITE);
+        draw_box(x, 151, x + 4, 156, WHITE);
+    }
+    for (int y = 96; y <= 142; y += 9) {
+        draw_box(124, y, 129, y + 4, WHITE);
+        draw_box(191, y, 196, y + 4, WHITE);
+    }
+
+    // Stop bars help the player read the traffic flow at a glance.
+    draw_box(136, 87, 182, 88, WHITE);
+    draw_box(136, 151, 182, 152, WHITE);
+    draw_box(127, 96, 128, 142, WHITE);
+    draw_box(192, 96, 193, 142, WHITE);
 }
 
 void draw_lights(void) {
@@ -962,36 +1048,52 @@ void draw_cars(void) {
     }
 }
 
+void draw_queue_bar(int x, int y, int value, short color) {
+    int width = value * 5;
+    if (width > 48) {
+        width = 48;
+    }
+    draw_box(x, y, x + 47, y + 3, BLACK);
+    if (width > 0) {
+        draw_box(x, y, x + width - 1, y + 3, color);
+    }
+}
+
 void draw_hud(void) {
     int time_left = (ROUND_TICKS - elapsed_ticks) / 10;
-    int wait_seconds = wait_seconds_total();
-    int phase_cd = phase_countdown_tenths();
     if (time_left < 0) time_left = 0;
-    draw_text(6, 6, "SCORE", WHITE, 1);
-    draw_int(40, 6, score, YELLOW, 1);
-    draw_text(92, 6, "PASS", WHITE, 1);
-    draw_int(120, 6, passed, GREEN, 1);
-    draw_text(154, 6, "WAIT", WHITE, 1);
-    draw_int(182, 6, wait_seconds, ORANGE, 1);
-    draw_text(214, 6, "TIME", WHITE, 1);
-    draw_int(244, 6, time_left, CYAN, 1);
-    draw_text(274, 6, "CD", WHITE, 1);
-    draw_int(296, 6, phase_cd, MAGENTA, 1);
 
-    draw_text(6, SCREEN_H - 13, "MODE", WHITE, 1);
-    draw_text(36, SCREEN_H - 13, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
-    draw_text(92, SCREEN_H - 13, "PH", WHITE, 1);
-    draw_text(110, SCREEN_H - 13, light_state_label(), YELLOW, 1);
-    draw_text(152, SCREEN_H - 13, "BEST", WHITE, 1);
-    draw_int(180, SCREEN_H - 13, best_score, MAGENTA, 1);
-    draw_text(214, SCREEN_H - 13, "N", WHITE, 1);
-    draw_int(222, SCREEN_H - 13, queue_n, CYAN, 1);
-    draw_text(238, SCREEN_H - 13, "S", WHITE, 1);
-    draw_int(246, SCREEN_H - 13, queue_s, CYAN, 1);
-    draw_text(262, SCREEN_H - 13, "W", WHITE, 1);
-    draw_int(270, SCREEN_H - 13, queue_w, CYAN, 1);
-    draw_text(286, SCREEN_H - 13, "E", WHITE, 1);
-    draw_int(294, SCREEN_H - 13, queue_e, CYAN, 1);
+    draw_text_centered(6, (rush_axis == RUSH_NS) ? "SERVE THE NS RUSH" : "SERVE THE EW RUSH", rush_axis_color(), 1);
+    draw_text_centered(SCREEN_H - 13, "A AUTO  1 NS  2 EW  3 STOP  P PAUSE", WHITE, 1);
+
+    draw_panel(8, 26, 92, 78, DARKGRAY, YELLOW);
+    draw_text_in_box(12, 88, 34, "SCORE", WHITE, 1);
+    draw_int_in_box(12, 88, 50, score, YELLOW, 2);
+
+    draw_panel(228, 26, 312, 78, DARKGRAY, CYAN);
+    draw_text_in_box(232, 308, 34, "TIME", WHITE, 1);
+    draw_int_in_box(232, 308, 50, time_left, CYAN, 2);
+    draw_text_in_box(232, 308, 66, light_state_label(), YELLOW, 1);
+
+    draw_panel(8, 162, 92, 214, DARKGRAY, rush_axis_color());
+    draw_text_in_box(12, 88, 170, (mode == AUTO_MODE) ? "MODE AUTO" : "MODE MAN", WHITE, 1);
+    draw_text_in_box(12, 88, 182, (rush_axis == RUSH_NS) ? "RUSH NS" : "RUSH EW", rush_axis_color(), 1);
+    if (flow_streak > 0) {
+        draw_text_in_box(12, 88, 194, "FLOW HOT", GREEN, 1);
+    } else {
+        draw_text_in_box(12, 88, 194, "KEEP FLOW", WHITE, 1);
+    }
+
+    draw_panel(228, 162, 312, 214, DARKGRAY, MAGENTA);
+    draw_text_in_box(232, 308, 170, "QUEUE LOAD", WHITE, 1);
+    draw_text(238, 180, "N", WHITE, 1);
+    draw_queue_bar(248, 181, queue_n, CYAN);
+    draw_text(238, 188, "S", WHITE, 1);
+    draw_queue_bar(248, 189, queue_s, CYAN);
+    draw_text(238, 196, "W", WHITE, 1);
+    draw_queue_bar(248, 197, queue_w, ORANGE);
+    draw_text(238, 204, "E", WHITE, 1);
+    draw_queue_bar(248, 205, queue_e, ORANGE);
 }
 
 void redraw_all(void) {
@@ -1173,6 +1275,7 @@ int main(void) {
              * show up as shimmer on text pixels. */
             if (scene == SCENE_PLAYING) {
                 elapsed_ticks++;
+                update_rush_cycle();
                 maybe_spawn_car();
                 update_cars();
                 if (detect_crash()) {
