@@ -53,9 +53,9 @@
 #define ALL_RED_TICKS 4
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
-#define PASS_SCORE 10
+#define PASS_SCORE 8
 #define WAIT_DISPLAY_DIVISOR 20
-#define WAIT_PENALTY_DIVISOR 30
+#define WAIT_PENALTY_DIVISOR 20
 
 typedef enum {
     NS_GREEN = 0,
@@ -417,6 +417,10 @@ const char *rush_axis_label(void) {
     return (rush_axis == RUSH_NS) ? "NS" : "EW";
 }
 
+const char *rush_notice_label(void) {
+    return (rush_axis == RUSH_NS) ? "PRIORITY NORTH SOUTH" : "PRIORITY EAST WEST";
+}
+
 short rush_axis_color(void) {
     return (rush_axis == RUSH_NS) ? GREEN : ORANGE;
 }
@@ -705,6 +709,17 @@ const char *light_state_label(void) {
     }
 }
 
+const char *light_state_long_label(void) {
+    switch (light_state) {
+        case NS_GREEN:  return "NS GREEN";
+        case NS_YELLOW: return "NS YELLOW";
+        case ALL_RED:   return "ALL RED";
+        case EW_GREEN:  return "EW GREEN";
+        case EW_YELLOW: return "EW YELLOW";
+        default:        return "ALL RED";
+    }
+}
+
 int phase_countdown_ticks(void) {
     int remaining = 0;
     if (mode == MANUAL_MODE && (light_state == NS_GREEN || light_state == EW_GREEN ||
@@ -780,7 +795,10 @@ void update_cars(void) {
                     flow_streak++;
                 }
                 if (is_rush_dir(cars[i].dir)) {
-                    bonus_score += 2;
+                    bonus_score += 1;
+                }
+                if (flow_streak >= 3) {
+                    bonus_score += 1;
                 }
             }
             cars[i].active = false;
@@ -876,27 +894,45 @@ void request_light_state(LightState target) {
 
 // Drawing
 void draw_light_vertical(int x, int y, short c_top, short c_mid, short c_bot) {
-    draw_box(x, y, x + 11, y + 35, DARKGRAY);
-    draw_box(x + 2, y + 2,  x + 9, y + 9,  c_top);
-    draw_box(x + 2, y + 13, x + 9, y + 20, c_mid);
-    draw_box(x + 2, y + 24, x + 9, y + 31, c_bot);
+    bool top_on = ((unsigned short)c_top == (unsigned short)RED);
+    bool mid_on = ((unsigned short)c_mid == (unsigned short)YELLOW);
+    bool bot_on = ((unsigned short)c_bot == (unsigned short)GREEN);
+
+    draw_box(x, y, x + 13, y + 41, BLACK);
+    draw_box(x + 1, y + 1, x + 12, y + 40, DARKGRAY);
+    draw_box(x + 2, y + 2, x + 11, y + 39, 0x2945);
+
+    if (top_on) {
+        draw_box(x + 2, y + 4, x + 11, y + 13, DARKRED);
+    }
+    draw_box(x + 3, y + 5,  x + 10, y + 12, c_top);
+
+    if (mid_on) {
+        draw_box(x + 2, y + 16, x + 11, y + 25, DARKYELLOW);
+    }
+    draw_box(x + 3, y + 17, x + 10, y + 24, c_mid);
+
+    if (bot_on) {
+        draw_box(x + 2, y + 28, x + 11, y + 37, DARKGREEN);
+    }
+    draw_box(x + 3, y + 29, x + 10, y + 36, c_bot);
 }
 
 void draw_intersection_base(void) {
     clear_screen(CITY_BG);
 
-    draw_box(0, 0, SCREEN_W - 1, 23, BLACK);
-    draw_box(0, SCREEN_H - 20, SCREEN_W - 1, SCREEN_H - 1, BLACK);
+    draw_box(0, 0, SCREEN_W - 1, 31, BLACK);
+    draw_box(0, SCREEN_H - 28, SCREEN_W - 1, SCREEN_H - 1, BLACK);
 
     // Building blocks for city-like background.
-    draw_box(6, 30, 92, 78, BUILDING);
-    draw_box(228, 30, 314, 78, BUILDING);
-    draw_box(6, 162, 92, 208, BUILDING);
-    draw_box(228, 162, 314, 208, BUILDING);
-    draw_box(10, 34, 88, 74, DARKGRAY);
-    draw_box(232, 34, 310, 74, DARKGRAY);
-    draw_box(10, 166, 88, 204, DARKGRAY);
-    draw_box(232, 166, 310, 204, DARKGRAY);
+    draw_box(6, 38, 92, 78, BUILDING);
+    draw_box(228, 38, 314, 78, BUILDING);
+    draw_box(6, 160, 92, 204, BUILDING);
+    draw_box(228, 160, 314, 204, BUILDING);
+    draw_box(10, 42, 88, 74, DARKGRAY);
+    draw_box(232, 42, 310, 74, DARKGRAY);
+    draw_box(10, 164, 88, 200, DARKGRAY);
+    draw_box(232, 164, 310, 200, DARKGRAY);
     for (int x = 18; x <= 72; x += 18) {
         draw_box(x, 42, x + 8, 50, SIDEWALK);
         draw_box(x, 56, x + 8, 64, SIDEWALK);
@@ -912,7 +948,7 @@ void draw_intersection_base(void) {
     draw_box(0, 88, SCREEN_W - 1, 152, ROAD);
 
     // vertical road
-    draw_box(126, 24, 194, 219, ROAD);
+    draw_box(126, 32, 194, 211, ROAD);
 
     // center region
     draw_box(126, 88, 194, 152, DARKGRAY);
@@ -921,20 +957,20 @@ void draw_intersection_base(void) {
     // Sidewalk around the intersection
     draw_box(0, 80, SCREEN_W - 1, 87, SIDEWALK);
     draw_box(0, 153, SCREEN_W - 1, 160, SIDEWALK);
-    draw_box(118, 24, 125, 219, SIDEWALK);
-    draw_box(195, 24, 202, 219, SIDEWALK);
+    draw_box(118, 32, 125, 211, SIDEWALK);
+    draw_box(195, 32, 202, 211, SIDEWALK);
 
     // Road edge
     draw_box(0, 88, SCREEN_W - 1, 88, ROAD_EDGE);
     draw_box(0, 152, SCREEN_W - 1, 152, ROAD_EDGE);
-    draw_box(126, 24, 126, 219, ROAD_EDGE);
-    draw_box(194, 24, 194, 219, ROAD_EDGE);
+    draw_box(126, 32, 126, 211, ROAD_EDGE);
+    draw_box(194, 32, 194, 211, ROAD_EDGE);
 
     // lane markers
     for (int x = 0; x < SCREEN_W; x += 20) {
         draw_box(x, 119, x + 8, 121, WHITE);
     }
-    for (int y = 28; y < 212; y += 20) {
+    for (int y = 36; y < 204; y += 20) {
         draw_box(159, y, 161, y + 8, WHITE);
     }
 
@@ -988,16 +1024,16 @@ void draw_lights(void) {
     }
 
     // Signal poles anchored on sidewalks, fully outside the traffic envelope.
-    draw_box(208, 58, 210, 88, DARKGRAY);
-    draw_box(110, 152, 112, 182, DARKGRAY);
+    draw_box(210, 62, 212, 90, DARKGRAY);
+    draw_box(108, 150, 110, 178, DARKGRAY);
     draw_box(84, 82, 112, 84, DARKGRAY);
-    draw_box(210, 156, 238, 158, DARKGRAY);
+    draw_box(212, 156, 240, 158, DARKGRAY);
 
     // Heads sit just outside the crosswalks.
-    draw_light_vertical(202, 38, ns_red, ns_yellow, ns_green);
-    draw_light_vertical(98, 162, ns_red, ns_yellow, ns_green);
-    draw_light_vertical(70, 48, ew_red, ew_yellow, ew_green);
-    draw_light_vertical(238, 162, ew_red, ew_yellow, ew_green);
+    draw_light_vertical(204, 42, ns_red, ns_yellow, ns_green);
+    draw_light_vertical(94, 154, ns_red, ns_yellow, ns_green);
+    draw_light_vertical(68, 46, ew_red, ew_yellow, ew_green);
+    draw_light_vertical(240, 154, ew_red, ew_yellow, ew_green);
 }
 
 void draw_vehicle_sprite(const Car *car) {
@@ -1069,31 +1105,30 @@ void draw_hud(void) {
     draw_text(212, 5, "BEST", WHITE, 1);
     draw_int(240, 5, best_score, MAGENTA, 1);
 
-    draw_text_centered(15, (rush_axis == RUSH_NS) ? "SERVE NS RUSH  +2" : "SERVE EW RUSH  +2", rush_axis_color(), 1);
-    draw_box(112, 20, 208, 21, DARKGRAY);
+    draw_text_centered(14, rush_notice_label(), rush_axis_color(), 1);
+    draw_box(108, 24, 212, 25, DARKGRAY);
     if (rush_seconds > 0) {
-        int fill = rush_ticks_left * 96 / 300;
+        int fill = rush_ticks_left * 104 / 300;
         if (fill < 4) fill = 4;
-        if (fill > 96) fill = 96;
-        draw_box(112, 20, 112 + fill - 1, 21, rush_axis_color());
+        if (fill > 104) fill = 104;
+        draw_box(108, 24, 108 + fill - 1, 25, rush_axis_color());
     }
 
-    draw_text(6, SCREEN_H - 14, "MODE", WHITE, 1);
-    draw_text(34, SCREEN_H - 14, (mode == AUTO_MODE) ? "AUTO" : "MAN", CYAN, 1);
-    draw_text(64, SCREEN_H - 14, "PH", WHITE, 1);
-    draw_text(80, SCREEN_H - 14, light_state_label(), YELLOW, 1);
-    draw_text(118, SCREEN_H - 14, "RUSH", WHITE, 1);
-    draw_text(146, SCREEN_H - 14, rush_axis_label(), rush_axis_color(), 1);
-    draw_text(164, SCREEN_H - 14, "N", WHITE, 1);
-    draw_int(172, SCREEN_H - 14, queue_n, CYAN, 1);
-    draw_text(188, SCREEN_H - 14, "S", WHITE, 1);
-    draw_int(196, SCREEN_H - 14, queue_s, CYAN, 1);
-    draw_text(212, SCREEN_H - 14, "W", WHITE, 1);
-    draw_int(220, SCREEN_H - 14, queue_w, ORANGE, 1);
-    draw_text(236, SCREEN_H - 14, "E", WHITE, 1);
-    draw_int(244, SCREEN_H - 14, queue_e, ORANGE, 1);
-    draw_text(260, SCREEN_H - 14, "FLOW", WHITE, 1);
-    draw_int(290, SCREEN_H - 14, flow_streak, GREEN, 1);
+    draw_text(6, SCREEN_H - 24, "MODE", WHITE, 1);
+    draw_text(34, SCREEN_H - 24, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
+    draw_text(90, SCREEN_H - 24, "LIGHT", WHITE, 1);
+    draw_text(124, SCREEN_H - 24, light_state_long_label(), YELLOW, 1);
+
+    draw_text(16, SCREEN_H - 13, "NORTH", WHITE, 1);
+    draw_int(52, SCREEN_H - 13, queue_n, CYAN, 1);
+    draw_text(76, SCREEN_H - 13, "SOUTH", WHITE, 1);
+    draw_int(112, SCREEN_H - 13, queue_s, CYAN, 1);
+    draw_text(146, SCREEN_H - 13, "WEST", WHITE, 1);
+    draw_int(176, SCREEN_H - 13, queue_w, ORANGE, 1);
+    draw_text(208, SCREEN_H - 13, "EAST", WHITE, 1);
+    draw_int(238, SCREEN_H - 13, queue_e, ORANGE, 1);
+    draw_text(266, SCREEN_H - 13, "BONUS", WHITE, 1);
+    draw_int(300, SCREEN_H - 13, bonus_score, GREEN, 1);
 }
 
 void redraw_all(void) {
@@ -1159,8 +1194,8 @@ void draw_title_scene(void) {
     draw_text_in_box(58, 261, 154, "PRESS SPACE", GREEN, 2);
     draw_text_in_box(58, 261, 172, "TO START", WHITE, 2);
 
-    draw_label_strip(92, 198, 227, 214, DARKGRAY);
-    draw_text_in_box(96, 223, 203, "I - INFO PAGE", WHITE, 1);
+    draw_label_strip(88, 196, 231, 216, DARKGRAY);
+    draw_text_in_box(92, 227, 202, "I - INFO PAGE", WHITE, 1);
 }
 
 void draw_title(void) {
