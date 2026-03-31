@@ -1023,6 +1023,11 @@ void draw_compact_button(int x1, int y1, int x2, int y2, short accent) {
     draw_box(x1 + 3, y1 + 3, x2 - 3, y1 + 5, accent);
 }
 
+void draw_label_strip(int x1, int y1, int x2, int y2, short fill) {
+    draw_box(x1, y1, x2, y2, BLACK);
+    draw_box(x1 + 3, y1 + 3, x2 - 3, y2 - 3, fill);
+}
+
 void draw_static_scene(SceneRenderer renderer) {
     renderer();
     present_frame();
@@ -1048,12 +1053,12 @@ void draw_title_scene(void) {
     draw_box(29, 90, 31, 116, BLACK);
     draw_box(289, 90, 291, 116, BLACK);
 
-    draw_panel(54, 148, 265, 192, DARKGRAY, DARKGREEN);
-    draw_text_in_box(58, 261, 156, "PRESS SPACE", GREEN, 2);
+    draw_panel(54, 146, 265, 192, DARKGRAY, DARKGREEN);
+    draw_text_in_box(58, 261, 154, "PRESS SPACE", GREEN, 2);
     draw_text_in_box(58, 261, 172, "TO START", WHITE, 2);
 
-    draw_compact_button(92, 198, 227, 214, CYAN);
-    draw_text_in_box(96, 223, 204, "I - INFO PAGE", CYAN, 1);
+    draw_label_strip(92, 198, 227, 214, DARKGRAY);
+    draw_text_in_box(96, 223, 203, "I - INFO PAGE", WHITE, 1);
 }
 
 void draw_title(void) {
@@ -1085,10 +1090,10 @@ void draw_instructions_scene(void) {
     draw_text_in_box(170, 282, 174, "3 ALL RED", WHITE, 1);
     draw_text_in_box(170, 282, 184, "S TITLE", WHITE, 1);
 
-    draw_compact_button(48, 198, 154, 214, DARKGREEN);
-    draw_compact_button(166, 198, 272, 214, MAGENTA);
-    draw_text_in_box(52, 150, 204, "SPACE PLAY", WHITE, 1);
-    draw_text_in_box(170, 268, 204, "S BACK", WHITE, 1);
+    draw_label_strip(48, 198, 154, 214, DARKGRAY);
+    draw_label_strip(166, 198, 272, 214, DARKGRAY);
+    draw_text_in_box(52, 150, 203, "SPACE PLAY", WHITE, 1);
+    draw_text_in_box(170, 268, 203, "S BACK", WHITE, 1);
 }
 
 void draw_instructions(void) {
@@ -1133,10 +1138,10 @@ void draw_game_over_scene(void) {
     draw_text_in_box(172, 272, 122, "PASS", WHITE, 1);
     draw_int_in_box(172, 272, 146, passed, GREEN, 2);
 
-    draw_compact_button(48, 196, 154, 212, MAGENTA);
-    draw_compact_button(166, 196, 272, 212, CYAN);
-    draw_text_in_box(52, 150, 202, "SPACE RETRY", WHITE, 1);
-    draw_text_in_box(170, 268, 202, "S TITLE", WHITE, 1);
+    draw_label_strip(48, 196, 154, 212, DARKGRAY);
+    draw_label_strip(166, 196, 272, 212, DARKGRAY);
+    draw_text_in_box(52, 150, 201, "SPACE RETRY", WHITE, 1);
+    draw_text_in_box(170, 268, 201, "S TITLE", WHITE, 1);
 }
 
 void draw_game_over(void) {
