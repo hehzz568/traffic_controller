@@ -1042,11 +1042,11 @@ void draw_title_scene(void) {
     draw_box(29, 90, 31, 116, BLACK);
     draw_box(289, 90, 291, 116, BLACK);
 
-    draw_panel(54, 160, 265, 206, DARKGRAY, DARKGREEN);
-    draw_text_in_box(58, 261, 170, "PRESS SPACE", GREEN, 2);
-    draw_text_in_box(58, 261, 188, "TO START", WHITE, 2);
+    draw_panel(54, 154, 265, 198, DARKGRAY, DARKGREEN);
+    draw_text_in_box(58, 261, 164, "PRESS SPACE", GREEN, 2);
+    draw_text_in_box(58, 261, 180, "TO START", WHITE, 2);
 
-    draw_panel(86, 200, 233, 222, DARKGRAY, CYAN);
+    draw_panel(86, 202, 233, 224, DARKGRAY, CYAN);
     draw_text_in_box(90, 229, 212, "I - INFO PAGE", CYAN, 1);
 }
 
@@ -1060,29 +1060,29 @@ void draw_instructions_scene(void) {
     draw_panel(52, 34, 267, 82, DARKGRAY, ROAD_EDGE);
     draw_text_in_box(56, 263, 48, "HOW TO PLAY", YELLOW, 2);
 
-    draw_panel(34, 92, 285, 128, DARKGRAY, CYAN);
-    draw_text(48, 104, "GOAL", CYAN, 1);
-    draw_text(96, 104, "KEEP TRAFFIC MOVING", WHITE, 1);
-    draw_text(96, 116, "AVOID ALL CRASHES", WHITE, 1);
+    draw_panel(34, 92, 285, 126, DARKGRAY, CYAN);
+    draw_text(50, 102, "GOAL", CYAN, 1);
+    draw_text(100, 102, "KEEP TRAFFIC MOVING", WHITE, 1);
+    draw_text(100, 114, "AVOID ALL CRASHES", WHITE, 1);
 
-    draw_panel(34, 138, 152, 194, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(38, 148, 148, "MAIN KEYS", CYAN, 1);
-    draw_text_in_box(38, 148, 158, "SPACE START", WHITE, 1);
-    draw_text_in_box(38, 148, 168, "A AUTO MANUAL", WHITE, 1);
-    draw_text_in_box(38, 148, 178, "1 NS GREEN", WHITE, 1);
-    draw_text_in_box(38, 148, 188, "3 ALL RED", WHITE, 1);
+    draw_panel(34, 136, 154, 198, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(38, 150, 146, "MAIN KEYS", CYAN, 1);
+    draw_text_in_box(38, 150, 158, "SPACE START", WHITE, 1);
+    draw_text_in_box(38, 150, 168, "A AUTO MANUAL", WHITE, 1);
+    draw_text_in_box(38, 150, 178, "1 NS GREEN", WHITE, 1);
+    draw_text_in_box(38, 150, 188, "2 EW GREEN", WHITE, 1);
 
-    draw_panel(168, 138, 286, 194, DARKGRAY, CYAN);
-    draw_text_in_box(172, 282, 148, "MORE KEYS", CYAN, 1);
-    draw_text_in_box(172, 282, 158, "P PAUSE", WHITE, 1);
-    draw_text_in_box(172, 282, 168, "R RESTART", WHITE, 1);
-    draw_text_in_box(172, 282, 178, "2 EW GREEN", WHITE, 1);
-    draw_text_in_box(172, 282, 188, "S TITLE", WHITE, 1);
+    draw_panel(166, 136, 286, 198, DARKGRAY, CYAN);
+    draw_text_in_box(170, 282, 146, "MORE KEYS", CYAN, 1);
+    draw_text_in_box(170, 282, 158, "P PAUSE", WHITE, 1);
+    draw_text_in_box(170, 282, 168, "R RESTART", WHITE, 1);
+    draw_text_in_box(170, 282, 178, "3 ALL RED", WHITE, 1);
+    draw_text_in_box(170, 282, 188, "S TITLE", WHITE, 1);
 
-    draw_panel(48, 198, 154, 218, DARKGRAY, DARKGREEN);
-    draw_panel(166, 198, 272, 218, DARKGRAY, MAGENTA);
-    draw_text_in_box(52, 150, 208, "SPACE PLAY", WHITE, 1);
-    draw_text_in_box(170, 268, 208, "S BACK", WHITE, 1);
+    draw_panel(48, 202, 154, 222, DARKGRAY, DARKGREEN);
+    draw_panel(166, 202, 272, 222, DARKGRAY, MAGENTA);
+    draw_text_in_box(52, 150, 212, "SPACE PLAY", WHITE, 1);
+    draw_text_in_box(170, 268, 212, "S BACK", WHITE, 1);
 }
 
 void draw_instructions(void) {
