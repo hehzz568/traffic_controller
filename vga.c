@@ -66,9 +66,9 @@
 #define ALL_RED_TICKS 4
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
-#define PASS_SCORE 8
+#define PASS_SCORE 25
 #define WAIT_DISPLAY_DIVISOR 20
-#define WAIT_PENALTY_DIVISOR 20
+#define WAIT_PENALTY_DIVISOR 40
 
 typedef enum {
     NS_GREEN = 0,
@@ -195,6 +195,7 @@ void update_pedestrians(void);
 void draw_pedestrians(void);
 void draw_waiting_pedestrians(void);
 void draw_crosswalk_guides(void);
+bool ped_area_clear(void);
 const char *ped_status_horizontal_label(void);
 const char *ped_status_vertical_label(void);
 short ped_status_horizontal_color(void);
@@ -609,7 +610,7 @@ void start_ped_phase(LightState walk_state) {
 
     if (walk_state == PED_HORIZONTAL_WALK) {
         int served = ped_waiting_horizontal;
-        if (served > 3) served = 3;
+        if (served > 2) served = 2;
         if (served < 1) served = 1;
 
         if (ped_waiting_horizontal >= served) ped_waiting_horizontal -= served;
@@ -619,10 +620,9 @@ void start_ped_phase(LightState walk_state) {
 
         if (served >= 1) spawn_pedestrian(true, PED_H_START_L - 4, PED_TOP_Y + 1, 2, 0, CYAN);
         if (served >= 2) spawn_pedestrian(true, PED_H_START_R + 4, PED_BOTTOM_Y + 1, -2, 0, MAGENTA);
-        if (served >= 3) spawn_pedestrian(true, PED_H_START_L - 14, PED_BOTTOM_Y + 1, 2, 0, WHITE);
     } else if (walk_state == PED_VERTICAL_WALK) {
         int served = ped_waiting_vertical;
-        if (served > 3) served = 3;
+        if (served > 2) served = 2;
         if (served < 1) served = 1;
 
         if (ped_waiting_vertical >= served) ped_waiting_vertical -= served;
@@ -632,7 +632,6 @@ void start_ped_phase(LightState walk_state) {
 
         if (served >= 1) spawn_pedestrian(false, PED_LEFT_X + 1, PED_V_START_T - 4, 0, 2, CYAN);
         if (served >= 2) spawn_pedestrian(false, PED_RIGHT_X + 1, PED_V_START_B + 4, 0, -2, MAGENTA);
-        if (served >= 3) spawn_pedestrian(false, PED_LEFT_X + 1, PED_V_START_B + 16, 0, -2, WHITE);
     }
 }
 
@@ -896,7 +895,7 @@ bool conflict_zone_blocked(const Car *car, int nx, int ny) {
 }
 
 void update_score(void) {
-    score = passed * PASS_SCORE + bonus_score - (wait_ticks_total / WAIT_PENALTY_DIVISOR);
+    score = passed * PASS_SCORE - (wait_ticks_total / WAIT_PENALTY_DIVISOR);
     if (score < 0) {
         score = 0;
     }
@@ -958,27 +957,27 @@ bool blocked_by_leader(const Car *car, int nx, int ny) {
 
 const char *light_state_label(void) {
     switch (light_state) {
-        case NS_GREEN:            return "NS GREEN";
-        case NS_YELLOW:           return "NS YELLOW";
-        case ALL_RED:             return "ALL RED";
-        case EW_GREEN:            return "EW GREEN";
-        case EW_YELLOW:           return "EW YELLOW";
+        case NS_GREEN:            return "NS GO";
+        case NS_YELLOW:           return "NS WAIT";
+        case ALL_RED:             return "STOP";
+        case EW_GREEN:            return "EW GO";
+        case EW_YELLOW:           return "EW WAIT";
         case PED_HORIZONTAL_WALK: return "TOP BOT";
         case PED_VERTICAL_WALK:   return "LEFT RIGHT";
-        default:                  return "ALL RED";
+        default:                  return "STOP";
     }
 }
 
 const char *light_state_long_label(void) {
     switch (light_state) {
-        case NS_GREEN:            return "NS GREEN";
-        case NS_YELLOW:           return "NS YELLOW";
-        case ALL_RED:             return "ALL RED";
-        case EW_GREEN:            return "EW GREEN";
-        case EW_YELLOW:           return "EW YELLOW";
+        case NS_GREEN:            return "NS GO";
+        case NS_YELLOW:           return "NS WAIT";
+        case ALL_RED:             return "STOP";
+        case EW_GREEN:            return "EW GO";
+        case EW_YELLOW:           return "EW WAIT";
         case PED_HORIZONTAL_WALK: return "TOP BOT WALK";
         case PED_VERTICAL_WALK:   return "LEFT RIGHT WALK";
-        default:                  return "ALL RED";
+        default:                  return "STOP";
     }
 }
 
@@ -1023,8 +1022,6 @@ int phase_countdown_tenths(void) {
 }
 
 void update_cars(void) {
-    bool waited_this_tick = false;
-
     for (int i = 0; i < MAX_CARS; i++) {
         if (!cars[i].active) continue;
 
@@ -1046,7 +1043,6 @@ void update_cars(void) {
         if (stopped_by_light || blocked_by_leader(&cars[i], nx, ny) ||
             (mode == AUTO_MODE && conflict_zone_blocked(&cars[i], nx, ny))) {
             wait_ticks_total++;
-            waited_this_tick = true;
             continue;
         }
 
@@ -1057,22 +1053,11 @@ void update_cars(void) {
             if (!cars[i].scored && passed_stop_line(&cars[i])) {
                 cars[i].scored = true;
                 passed++;
-                if (flow_streak < 9) {
-                    flow_streak++;
-                }
-                if (is_rush_dir(cars[i].dir)) {
-                    bonus_score += 1;
-                }
-                if (flow_streak >= 3) {
-                    bonus_score += 1;
-                }
             }
             cars[i].active = false;
         }
     }
-    if (waited_this_tick && flow_streak > 0) {
-        flow_streak--;
-    }
+
     update_queue_lengths();
     update_score();
 }
@@ -1128,7 +1113,9 @@ void update_light_transition(void) {
         phase_ticks = 0;
     } else if (light_state == ALL_RED && next_green_state != ALL_RED && phase_ticks >= ALL_RED_TICKS) {
         if (is_ped_walk_state(next_green_state)) {
-            start_ped_phase(next_green_state);
+            if (ped_area_clear()) {
+                start_ped_phase(next_green_state);
+            }
         } else {
             light_state = next_green_state;
             phase_ticks = 0;
@@ -1174,7 +1161,9 @@ void request_light_state(LightState target) {
         phase_ticks = 0;
     } else if (light_state == ALL_RED) {
         if (is_ped_walk_state(target)) {
-            start_ped_phase(target);
+            if (ped_area_clear()) {
+                start_ped_phase(target);
+            }
         } else {
             light_state = target;
             phase_ticks = 0;
@@ -1408,58 +1397,60 @@ void draw_vehicle_sprite(const Car *car) {
 }
 
 
+bool ped_area_clear(void) {
+    for (int i = 0; i < MAX_CARS; i++) {
+        if (!cars[i].active) continue;
+
+        int x1 = cars[i].x;
+        int y1 = cars[i].y;
+        int x2 = cars[i].x + car_width(&cars[i]) - 1;
+        int y2 = cars[i].y + car_height(&cars[i]) - 1;
+
+        if (rect_overlap(x1, y1, x2, y2, 116, 79, 204, 161)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
 void draw_pedestrian_sprite(const Pedestrian *ped) {
     int x = ped->x;
     int y = ped->y;
     short body = ped->color;
 
-    draw_box(x + 2, y, x + 4, y + 1, body);
-    draw_box(x + 2, y + 2, x + 4, y + 4, body);
-    draw_box(x + 1, y + 2, x + 1, y + 3, WHITE);
-    draw_box(x + 5, y + 2, x + 5, y + 3, WHITE);
-    draw_box(x + 2, y + 5, x + 2, y + 6, body);
-    draw_box(x + 4, y + 5, x + 4, y + 6, body);
+    draw_box(x + 2, y, x + 4, y + 2, WHITE);
+    draw_box(x + 2, y + 1, x + 4, y + 2, body);
+    draw_box(x + 3, y + 3, x + 3, y + 7, body);
+    draw_box(x + 1, y + 4, x + 2, y + 4, body);
+    draw_box(x + 4, y + 4, x + 5, y + 4, body);
+    draw_box(x + 2, y + 8, x + 2, y + 9, body);
+    draw_box(x + 4, y + 8, x + 4, y + 9, body);
 }
 
-void draw_wait_token(int x, int y, short color) {
-    draw_box(x, y, x + 10, y + 10, BLACK);
-    draw_box(x + 1, y + 1, x + 9, y + 9, DARKGRAY);
-    draw_box(x + 2, y + 2, x + 8, y + 8, color);
-    draw_box(x + 4, y + 4, x + 6, y + 6, WHITE);
-}
 
 void draw_crosswalk_guides(void) {
-    short horizontal_color = 0;
-    short vertical_color = 0;
+    short top_bot_color = 0;
+    short left_right_color = 0;
 
-    if (light_state == PED_HORIZONTAL_WALK) horizontal_color = GREEN;
-    else if (ped_waiting_horizontal > 0) horizontal_color = CYAN;
+    if (light_state == PED_HORIZONTAL_WALK) top_bot_color = GREEN;
+    else if (ped_waiting_horizontal > 0) top_bot_color = YELLOW;
 
-    if (light_state == PED_VERTICAL_WALK) vertical_color = GREEN;
-    else if (ped_waiting_vertical > 0) vertical_color = ORANGE;
+    if (light_state == PED_VERTICAL_WALK) left_right_color = GREEN;
+    else if (ped_waiting_vertical > 0) left_right_color = YELLOW;
 
-    if (horizontal_color != 0) {
-        draw_box(132, 79, 186, 80, horizontal_color);
-        draw_box(132, 87, 186, 88, horizontal_color);
-        draw_box(132, 79, 133, 88, horizontal_color);
-        draw_box(185, 79, 186, 88, horizontal_color);
-
-        draw_box(132, 152, 186, 153, horizontal_color);
-        draw_box(132, 160, 186, 161, horizontal_color);
-        draw_box(132, 152, 133, 161, horizontal_color);
-        draw_box(185, 152, 186, 161, horizontal_color);
+    if (top_bot_color != 0) {
+        draw_box(134, 79, 184, 80, top_bot_color);
+        draw_box(134, 87, 184, 88, top_bot_color);
+        draw_box(134, 152, 184, 153, top_bot_color);
+        draw_box(134, 160, 184, 161, top_bot_color);
     }
 
-    if (vertical_color != 0) {
-        draw_box(117, 92, 126, 93, vertical_color);
-        draw_box(117, 92, 118, 146, vertical_color);
-        draw_box(125, 92, 126, 146, vertical_color);
-        draw_box(117, 145, 126, 146, vertical_color);
-
-        draw_box(194, 92, 203, 93, vertical_color);
-        draw_box(194, 92, 195, 146, vertical_color);
-        draw_box(202, 92, 203, 146, vertical_color);
-        draw_box(194, 145, 203, 146, vertical_color);
+    if (left_right_color != 0) {
+        draw_box(117, 94, 118, 144, left_right_color);
+        draw_box(125, 94, 126, 144, left_right_color);
+        draw_box(194, 94, 195, 144, left_right_color);
+        draw_box(202, 94, 203, 144, left_right_color);
     }
 }
 
@@ -1471,21 +1462,6 @@ void draw_pedestrians(void) {
 }
 
 void draw_waiting_pedestrians(void) {
-    static const int horiz_pos[4][2] = {
-        {104, 67}, {206, 167}, {92, 167}, {218, 67}
-    };
-    static const int vert_pos[4][2] = {
-        {104, 94}, {206, 136}, {104, 136}, {206, 94}
-    };
-    static const short colors[4] = {CYAN, MAGENTA, WHITE, YELLOW};
-
-    for (int i = 0; i < ped_waiting_horizontal && i < 4; i++) {
-        draw_wait_token(horiz_pos[i][0], horiz_pos[i][1], colors[i]);
-    }
-
-    for (int i = 0; i < ped_waiting_vertical && i < 4; i++) {
-        draw_wait_token(vert_pos[i][0], vert_pos[i][1], colors[i]);
-    }
 }
 
 void draw_cars(void) {
@@ -1497,64 +1473,53 @@ void draw_cars(void) {
 
 void draw_hud(void) {
     int wait_seconds = wait_seconds_total();
-    int remaining_seconds = remaining_round_seconds();
     int waiting_total = ped_waiting_horizontal + ped_waiting_vertical;
 
-    draw_label_strip(4, 3, 64, 19, DARKGRAY);
+    draw_label_strip(4, 3, 78, 19, DARKGRAY);
     draw_text(10, 7, "SCORE", WHITE, 1);
-    draw_int_right(58, 7, score, YELLOW, 1);
+    draw_int_right(72, 7, score, YELLOW, 1);
 
-    draw_label_strip(68, 3, 128, 19, DARKGRAY);
-    draw_text(74, 7, "PASS", WHITE, 1);
-    draw_int_right(122, 7, passed, GREEN, 1);
+    draw_label_strip(82, 3, 156, 19, DARKGRAY);
+    draw_text(88, 7, "PASS", WHITE, 1);
+    draw_int_right(150, 7, passed, GREEN, 1);
 
-    draw_label_strip(132, 3, 192, 19, DARKGRAY);
-    draw_text(138, 7, "WAIT", WHITE, 1);
-    draw_int_right(186, 7, wait_seconds, ORANGE, 1);
+    draw_label_strip(160, 3, 234, 19, DARKGRAY);
+    draw_text(166, 7, "WAIT", WHITE, 1);
+    draw_int_right(228, 7, wait_seconds, ORANGE, 1);
 
-    draw_label_strip(196, 3, 256, 19, DARKGRAY);
-    draw_text(202, 7, "TIME", WHITE, 1);
-    draw_int_right(250, 7, remaining_seconds, CYAN, 1);
-
-    draw_label_strip(260, 3, 316, 19, DARKGRAY);
-    draw_text(266, 7, "BEST", WHITE, 1);
+    draw_label_strip(238, 3, 316, 19, DARKGRAY);
+    draw_text(244, 7, "BEST", WHITE, 1);
     draw_int_right(310, 7, best_score, MAGENTA, 1);
 
-    draw_label_strip(4, 22, 92, 34, DARKGRAY);
-    draw_text(10, 26, "N", WHITE, 1);
-    draw_int(18, 26, queue_n, CYAN, 1);
-    draw_text(34, 26, "S", WHITE, 1);
-    draw_int(42, 26, queue_s, CYAN, 1);
-    draw_text(58, 26, "W", WHITE, 1);
-    draw_int(66, 26, queue_w, ORANGE, 1);
-    draw_text(78, 26, "E", WHITE, 1);
-    draw_int(86, 26, queue_e, ORANGE, 1);
+    draw_label_strip(4, 22, 156, 36, DARKGRAY);
+    draw_text(10, 26, "CARS", WHITE, 1);
+    draw_text(46, 26, "N", WHITE, 1);
+    draw_int(54, 26, queue_n, CYAN, 1);
+    draw_text(72, 26, "S", WHITE, 1);
+    draw_int(80, 26, queue_s, CYAN, 1);
+    draw_text(98, 26, "W", WHITE, 1);
+    draw_int(106, 26, queue_w, ORANGE, 1);
+    draw_text(124, 26, "E", WHITE, 1);
+    draw_int(132, 26, queue_e, ORANGE, 1);
 
-    draw_label_strip(96, 22, 210, 34, DARKGRAY);
-    draw_text(104, 26, "FLOW", WHITE, 1);
-    draw_text_right(204, 26, rush_axis_label(), rush_axis_color(), 1);
-
-    draw_label_strip(214, 22, 316, 34, DARKGRAY);
-    draw_text(220, 26, "WAITING", WHITE, 1);
+    draw_label_strip(162, 22, 316, 36, DARKGRAY);
+    draw_text(168, 26, "PEOPLE WAITING", WHITE, 1);
     draw_int_right(310, 26, waiting_total, waiting_total > 0 ? ORANGE : GREEN, 1);
 
-    draw_panel(4, 207, 70, 236, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(8, 66, 213, "MODE", WHITE, 1);
-    draw_text_in_box(8, 66, 225, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
+    draw_panel(4, 207, 72, 236, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(8, 68, 214, "MODE", WHITE, 1);
+    draw_text_in_box(8, 68, 226, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
 
-    draw_panel(76, 207, 160, 236, DARKGRAY, YELLOW);
-    draw_text_in_box(80, 156, 213, "SIGNAL", WHITE, 1);
-    draw_text_in_box(80, 156, 225, light_state_label(), YELLOW, 1);
+    draw_panel(78, 207, 170, 236, DARKGRAY, YELLOW);
+    draw_text_in_box(82, 166, 214, "LIGHT", WHITE, 1);
+    draw_text_in_box(82, 166, 226, light_state_label(), YELLOW, 1);
 
-    draw_panel(166, 207, 240, 236, DARKGRAY, CYAN);
-    draw_text_in_box(170, 236, 213, "TOP BOT", WHITE, 1);
-    draw_text_in_box(170, 236, 225, ped_status_horizontal_label(), ped_status_horizontal_color(), 1);
-    draw_int_right(234, 225, ped_waiting_horizontal, ped_status_horizontal_color(), 1);
-
-    draw_panel(246, 207, 316, 236, DARKGRAY, ORANGE);
-    draw_text_in_box(250, 312, 213, "LEFT RIGHT", WHITE, 1);
-    draw_text_in_box(250, 312, 225, ped_status_vertical_label(), ped_status_vertical_color(), 1);
-    draw_int_right(310, 225, ped_waiting_vertical, ped_status_vertical_color(), 1);
+    draw_panel(176, 207, 316, 236, DARKGRAY, CYAN);
+    draw_text_in_box(180, 312, 214, "PEOPLE", WHITE, 1);
+    draw_text(188, 221, "TOP BOT", WHITE, 1);
+    draw_int_right(310, 221, ped_waiting_horizontal, ped_waiting_horizontal > 0 ? ORANGE : GREEN, 1);
+    draw_text(188, 229, "LEFT RIGHT", WHITE, 1);
+    draw_int_right(310, 229, ped_waiting_vertical, ped_waiting_vertical > 0 ? ORANGE : GREEN, 1);
 }
 
 void redraw_all(void) {
@@ -1603,42 +1568,37 @@ void draw_static_scene(SceneRenderer renderer) {
 void draw_title_scene(void) {
     draw_page_frame(CITY_BG);
 
-    draw_panel(38, 28, 281, 94, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(42, 277, 42, "TRAFFIC CONTROL", YELLOW, 2);
-    draw_text_in_box(42, 277, 68, "CAR FLOW AND CROSSWALK", CYAN, 1);
-    draw_text_in_box(42, 277, 80, "BY ALAN HE AND HARRY ZHANG", WHITE, 1);
+    draw_panel(40, 28, 279, 86, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(44, 275, 42, "TRAFFIC CONTROL", YELLOW, 2);
+    draw_text_in_box(44, 275, 68, "CARS AND CROSSWALKS", CYAN, 1);
 
-    draw_box(34, 106, 286, 146, ROAD);
-    draw_box(118, 90, 202, 162, ROAD);
-    draw_box(34, 106, 286, 110, SIDEWALK);
-    draw_box(34, 142, 286, 146, SIDEWALK);
-    draw_box(114, 90, 118, 162, SIDEWALK);
-    draw_box(202, 90, 206, 162, SIDEWALK);
+    draw_box(34, 102, 286, 150, ROAD);
+    draw_box(118, 88, 202, 164, ROAD);
+    draw_box(34, 102, 286, 106, SIDEWALK);
+    draw_box(34, 146, 286, 150, SIDEWALK);
+    draw_box(114, 88, 118, 164, SIDEWALK);
+    draw_box(202, 88, 206, 164, SIDEWALK);
     for (int x = 56; x <= 250; x += 26) {
-        draw_box(x, 123, x + 10, 126, WHITE);
+        draw_box(x, 124, x + 10, 127, WHITE);
     }
     for (int x = 128; x <= 188; x += 10) {
-        draw_box(x, 106, x + 4, 110, WHITE);
-        draw_box(x, 142, x + 4, 146, WHITE);
+        draw_box(x, 102, x + 4, 106, WHITE);
+        draw_box(x, 146, x + 4, 150, WHITE);
     }
     for (int y = 100; y <= 150; y += 10) {
         draw_box(114, y, 118, y + 4, WHITE);
         draw_box(202, y, 206, y + 4, WHITE);
     }
+    draw_light_vertical(24, 56, RED, DARKYELLOW, DARKGREEN);
+    draw_light_vertical(282, 56, RED, DARKYELLOW, DARKGREEN);
+    { Pedestrian demo1 = {true, true, 136, 112, 0, 0, CYAN}; draw_pedestrian_sprite(&demo1); }
+    { Pedestrian demo2 = {true, true, 182, 128, 0, 0, MAGENTA}; draw_pedestrian_sprite(&demo2); }
 
-    draw_light_vertical(22, 52, RED, DARKYELLOW, DARKGREEN);
-    draw_light_vertical(284, 52, DARKRED, YELLOW, DARKGREEN);
-    draw_light_horizontal(52, 88, RED, DARKYELLOW, DARKGREEN);
-    draw_light_horizontal(226, 134, RED, DARKYELLOW, DARKGREEN);
-    { Pedestrian demo1 = {true, true, 134, 114, 0, 0, CYAN}; draw_pedestrian_sprite(&demo1); }
-    { Pedestrian demo2 = {true, true, 182, 130, 0, 0, MAGENTA}; draw_pedestrian_sprite(&demo2); }
+    draw_panel(50, 164, 270, 196, DARKGRAY, DARKGREEN);
+    draw_text_in_box(54, 266, 174, "PRESS SPACE TO START", GREEN, 1);
 
-    draw_panel(50, 160, 270, 196, DARKGRAY, DARKGREEN);
-    draw_text_in_box(54, 266, 170, "PRESS SPACE TO START", GREEN, 1);
-    draw_text_in_box(54, 266, 182, "AUTO MANUAL AND WALK", WHITE, 1);
-
-    draw_label_strip(64, 202, 254, 218, DARKGRAY);
-    draw_text_in_box(68, 250, 207, "I INFO PAGE", WHITE, 1);
+    draw_label_strip(82, 204, 238, 218, DARKGRAY);
+    draw_text_in_box(86, 234, 208, "I HELP", WHITE, 1);
 }
 
 void draw_title(void) {
@@ -1651,31 +1611,32 @@ void draw_instructions_scene(void) {
     draw_panel(46, 28, 273, 74, DARKGRAY, ROAD_EDGE);
     draw_text_in_box(50, 269, 40, "HOW TO PLAY", YELLOW, 2);
 
-    draw_panel(28, 84, 291, 120, DARKGRAY, CYAN);
+    draw_panel(28, 84, 291, 116, DARKGRAY, CYAN);
     draw_text(40, 94, "GOAL", CYAN, 1);
-    draw_text(82, 94, "MOVE CARS FAST", WHITE, 1);
-    draw_text(82, 106, "SERVE WALK REQUESTS SAFELY", WHITE, 1);
+    draw_text(82, 94, "MOVE CARS", WHITE, 1);
+    draw_text(148, 94, "AVOID CRASHES", WHITE, 1);
+    draw_text(82, 104, "STOP FOR WALKERS", WHITE, 1);
 
-    draw_panel(28, 128, 155, 204, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(32, 151, 138, "FLOW KEYS", CYAN, 1);
+    draw_panel(28, 126, 155, 206, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(32, 151, 138, "MAIN KEYS", CYAN, 1);
     draw_text_in_box(32, 151, 150, "SPACE START", WHITE, 1);
     draw_text_in_box(32, 151, 160, "A AUTO MANUAL", WHITE, 1);
     draw_text_in_box(32, 151, 170, "1 NS GREEN", WHITE, 1);
     draw_text_in_box(32, 151, 180, "2 EW GREEN", WHITE, 1);
     draw_text_in_box(32, 151, 190, "3 ALL RED", WHITE, 1);
 
-    draw_panel(165, 128, 292, 204, DARKGRAY, CYAN);
-    draw_text_in_box(169, 288, 138, "ROUND KEYS", CYAN, 1);
-    draw_text_in_box(169, 288, 150, "4 TOP BOT WALK", WHITE, 1);
-    draw_text_in_box(169, 288, 160, "5 LEFT RIGHT WALK", WHITE, 1);
+    draw_panel(165, 126, 292, 206, DARKGRAY, CYAN);
+    draw_text_in_box(169, 288, 138, "WALK KEYS", CYAN, 1);
+    draw_text_in_box(169, 288, 150, "4 TOP BOT", WHITE, 1);
+    draw_text_in_box(169, 288, 160, "5 LEFT RIGHT", WHITE, 1);
     draw_text_in_box(169, 288, 170, "P PAUSE", WHITE, 1);
     draw_text_in_box(169, 288, 180, "R RESTART", WHITE, 1);
     draw_text_in_box(169, 288, 190, "S TITLE", WHITE, 1);
 
-    draw_label_strip(44, 210, 160, 226, DARKGRAY);
-    draw_label_strip(162, 210, 276, 226, DARKGRAY);
-    draw_text_in_box(48, 156, 215, "SPACE PLAY", WHITE, 1);
-    draw_text_in_box(166, 272, 215, "S BACK", WHITE, 1);
+    draw_label_strip(44, 212, 160, 226, DARKGRAY);
+    draw_label_strip(162, 212, 276, 226, DARKGRAY);
+    draw_text_in_box(48, 156, 216, "SPACE PLAY", WHITE, 1);
+    draw_text_in_box(166, 272, 216, "S BACK", WHITE, 1);
 }
 
 void draw_instructions(void) {
