@@ -558,8 +558,6 @@ LightState choose_pending_ped_state(void) {
     if (ped_waiting_horizontal > 0 && ped_waiting_vertical > 0) {
         return PED_ALL_WALK;
     }
-    if (ped_waiting_horizontal > 0) return PED_HORIZONTAL_WALK;
-    if (ped_waiting_vertical > 0) return PED_VERTICAL_WALK;
     return ALL_RED;
 }
 
@@ -580,11 +578,11 @@ void clear_pedestrians(void) {
 }
 
 bool ped_flow_allowed_horizontal(void) {
-    return light_state == EW_GREEN || light_state == PED_HORIZONTAL_WALK || light_state == PED_ALL_WALK;
+    return light_state == EW_GREEN || light_state == PED_ALL_WALK;
 }
 
 bool ped_flow_allowed_vertical(void) {
-    return light_state == NS_GREEN || light_state == PED_VERTICAL_WALK || light_state == PED_ALL_WALK;
+    return light_state == NS_GREEN || light_state == PED_ALL_WALK;
 }
 
 int count_active_pedestrians(bool horizontal) {
@@ -622,6 +620,10 @@ void add_ped_waiters(bool horizontal, int count) {
 }
 
 void maybe_queue_ped_request(void) {
+    if (light_state == PED_ALL_WALK) {
+        return;
+    }
+
     if ((int)(next_rand() % 100u) >= PED_REQUEST_CHANCE_PERCENT) {
         return;
     }
@@ -680,20 +682,21 @@ void start_ped_phase(LightState walk_state) {
     } else if (walk_state == PED_ALL_WALK) {
         ped_wait_ticks_horizontal = 0;
         ped_wait_ticks_vertical = 0;
-        release_waiting_pedestrians(true, 4);
-        release_waiting_pedestrians(false, 4);
+        release_waiting_pedestrians(true, MAX_PEDS);
+        release_waiting_pedestrians(false, MAX_PEDS);
     }
 }
 
 void maybe_spawn_pedestrians_for_current_state(void) {
+    bool all_walk = (light_state == PED_ALL_WALK);
     bool exclusive_walk = is_ped_walk_state(light_state);
-    int spawn_tick = exclusive_walk ? 6 : 8;
+    int spawn_tick = all_walk ? 4 : (exclusive_walk ? 6 : 8);
 
     if (ped_flow_allowed_horizontal() && ped_waiting_horizontal > 0) {
         int active_h = count_active_pedestrians(true);
         if (active_h == 0 || (phase_ticks % spawn_tick) == 0) {
             int count = ped_waiting_horizontal;
-            if (count > 2) count = 2;
+            if (!all_walk && count > 2) count = 2;
             release_waiting_pedestrians(true, count);
         }
     }
@@ -702,7 +705,7 @@ void maybe_spawn_pedestrians_for_current_state(void) {
         int active_v = count_active_pedestrians(false);
         if (active_v == 0 || (phase_ticks % spawn_tick) == 0) {
             int count = ped_waiting_vertical;
-            if (count > 2) count = 2;
+            if (!all_walk && count > 2) count = 2;
             release_waiting_pedestrians(false, count);
         }
     }
@@ -713,7 +716,7 @@ void update_pedestrians(void) {
 
     if (exclusive_walk) {
         phase_ticks++;
-        if (phase_ticks < PED_WALK_TICKS) {
+        if (light_state == PED_ALL_WALK || phase_ticks < PED_WALK_TICKS) {
             maybe_spawn_pedestrians_for_current_state();
         }
     } else if (ped_flow_allowed_horizontal() || ped_flow_allowed_vertical()) {
@@ -742,10 +745,22 @@ void update_pedestrians(void) {
         any_active = true;
     }
 
-    if (exclusive_walk && phase_ticks >= PED_WALK_TICKS && !any_active) {
-        light_state = ALL_RED;
-        phase_ticks = 0;
-        next_green_state = (mode == AUTO_MODE) ? choose_resume_green_state() : ALL_RED;
+    if (exclusive_walk) {
+        bool queue_cleared = false;
+
+        if (light_state == PED_ALL_WALK) {
+            queue_cleared = (ped_waiting_horizontal == 0 && ped_waiting_vertical == 0);
+        } else if (light_state == PED_HORIZONTAL_WALK) {
+            queue_cleared = (ped_waiting_horizontal == 0);
+        } else {
+            queue_cleared = (ped_waiting_vertical == 0);
+        }
+
+        if (phase_ticks >= PED_WALK_TICKS && queue_cleared && !any_active) {
+            light_state = ALL_RED;
+            phase_ticks = 0;
+            next_green_state = (mode == AUTO_MODE) ? choose_resume_green_state() : ALL_RED;
+        }
     }
 }
 
@@ -1040,9 +1055,9 @@ const char *light_state_label(void) {
         case ALL_RED:             return "STOP";
         case EW_GREEN:            return "E/W GO";
         case EW_YELLOW:           return "CHANGE";
-        case PED_HORIZONTAL_WALK: return "LEFT/RIGHT";
-        case PED_VERTICAL_WALK:   return "UP/DOWN";
-        case PED_ALL_WALK:        return "ALL WALK";
+        case PED_HORIZONTAL_WALK: return "SIDE WALK";
+        case PED_VERTICAL_WALK:   return "UP DOWN";
+        case PED_ALL_WALK:        return "ALL STOP";
         default:                  return "STOP";
     }
 }
@@ -1054,9 +1069,9 @@ const char *light_state_long_label(void) {
         case ALL_RED:             return "STOP";
         case EW_GREEN:            return "E/W GO";
         case EW_YELLOW:           return "CHANGE";
-        case PED_HORIZONTAL_WALK: return "LEFT RIGHT WALK";
+        case PED_HORIZONTAL_WALK: return "SIDE WALK";
         case PED_VERTICAL_WALK:   return "UP DOWN WALK";
-        case PED_ALL_WALK:        return "ALL WALK";
+        case PED_ALL_WALK:        return "ALL STOP";
         default:                  return "STOP";
     }
 }
@@ -1601,11 +1616,11 @@ void draw_hud(void) {
     draw_text_in_box(78, 166, 213, "LIGHT", WHITE, 1);
     draw_text_in_box(78, 166, 225, light_state_label(), YELLOW, 1);
 
-    draw_panel(176, 200, 316, 237, DARKGRAY, CYAN);
-    draw_text(184, 206, "PEOPLE", WHITE, 1);
-    draw_text(184, 216, "UP DOWN", ped_status_vertical_color(), 1);
-    draw_int_right(306, 216, ped_waiting_vertical, ped_status_vertical_color(), 1);
-    draw_text(184, 224, "LEFT RIGHT", ped_status_horizontal_color(), 1);
+    draw_panel(176, 194, 316, 237, DARKGRAY, CYAN);
+    draw_text(184, 202, "PEOPLE", WHITE, 1);
+    draw_text(184, 214, "UP/DN", ped_status_vertical_color(), 1);
+    draw_int_right(306, 214, ped_waiting_vertical, ped_status_vertical_color(), 1);
+    draw_text(184, 224, "SIDE", ped_status_horizontal_color(), 1);
     draw_int_right(306, 224, ped_waiting_horizontal, ped_status_horizontal_color(), 1);
 }
 
@@ -1703,7 +1718,7 @@ void draw_instructions_scene(void) {
     draw_text(40, 94, "GOAL", CYAN, 1);
     draw_text(82, 94, "MOVE CARS", WHITE, 1);
     draw_text(148, 94, "AVOID CRASHES", WHITE, 1);
-    draw_text(82, 104, "STOP FOR WALKERS", WHITE, 1);
+    draw_text(82, 104, "GREEN MOVES SAME WAY WALKERS", WHITE, 1);
 
     draw_panel(28, 126, 155, 206, DARKGRAY, ROAD_EDGE);
     draw_text_in_box(32, 151, 138, "MAIN KEYS", CYAN, 1);
@@ -1711,12 +1726,12 @@ void draw_instructions_scene(void) {
     draw_text_in_box(32, 151, 160, "A AUTO MANUAL", WHITE, 1);
     draw_text_in_box(32, 151, 170, "1 NS GREEN", WHITE, 1);
     draw_text_in_box(32, 151, 180, "2 EW GREEN", WHITE, 1);
-    draw_text_in_box(32, 151, 190, "3 ALL WALK", WHITE, 1);
+    draw_text_in_box(32, 151, 190, "3 ALL STOP", WHITE, 1);
 
     draw_panel(165, 126, 292, 206, DARKGRAY, CYAN);
     draw_text_in_box(169, 288, 138, "WALK KEYS", CYAN, 1);
-    draw_text_in_box(169, 288, 150, "4 TOP BOT", WHITE, 1);
-    draw_text_in_box(169, 288, 160, "5 LEFT RIGHT", WHITE, 1);
+    draw_text_in_box(169, 288, 150, "4 ADD UP DOWN", WHITE, 1);
+    draw_text_in_box(169, 288, 160, "5 ADD SIDE", WHITE, 1);
     draw_text_in_box(169, 288, 170, "P PAUSE", WHITE, 1);
     draw_text_in_box(169, 288, 180, "R RESTART", WHITE, 1);
     draw_text_in_box(169, 288, 190, "S TITLE", WHITE, 1);
@@ -1791,8 +1806,8 @@ void draw_game_over(void) {
 // Main controls:
 // TITLE: SPACE start, I info
 // INSTRUCTIONS: SPACE start, S back
-// PLAYING: SPACE/P pause, A auto/manual, 1 force NS, 2 force EW, 3 all red,
-//          4 ped h walk, 5 ped v walk, R restart, S title
+// PLAYING: SPACE/P pause, A auto/manual, 1 force NS, 2 force EW, 3 all stop,
+//          4 add up/down people, 5 add side people, R restart, S title
 // PAUSED: SPACE resume, S title
 // GAME OVER: SPACE retry, S title
 int main(void) {
@@ -1821,9 +1836,7 @@ int main(void) {
                 maybe_spawn_car();
                 update_cars();
                 bool ped_phase_before = is_ped_walk_state(light_state);
-                if (ped_phase_before) {
-                    update_pedestrians();
-                }
+                update_pedestrians();
                 if (detect_crash()) {
                     end_reason = END_CRASH;
                     scene = SCENE_GAME_OVER;
@@ -1889,12 +1902,10 @@ int main(void) {
                     request_light_state(PED_ALL_WALK);
                     redraw_all();
                 } else if (key == 0x25) {   // '4'
-                    mode = MANUAL_MODE;
-                    request_light_state(PED_HORIZONTAL_WALK);
+                    request_light_state(PED_VERTICAL_WALK);
                     redraw_all();
                 } else if (key == 0x2E) {   // '5'
-                    mode = MANUAL_MODE;
-                    request_light_state(PED_VERTICAL_WALK);
+                    request_light_state(PED_HORIZONTAL_WALK);
                     redraw_all();
                 } else if (key == 0x1C) {   // 'A'
                     mode = (mode == AUTO_MODE) ? MANUAL_MODE : AUTO_MODE;
