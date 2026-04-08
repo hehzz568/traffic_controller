@@ -68,9 +68,11 @@
 #define ALL_RED_TICKS 4
 #define MAX_GREEN_TICKS 40
 #define ROUND_TICKS 1200
-#define PASS_SCORE 25
+#define CAR_PASS_SCORE 25
+#define PED_PASS_SCORE 15
 #define WAIT_DISPLAY_DIVISOR 20
 #define WAIT_PENALTY_DIVISOR 40
+#define PED_WAIT_PENALTY_DIVISOR 60
 
 typedef enum {
     NS_GREEN = 0,
@@ -130,6 +132,7 @@ typedef struct {
     int dx;
     int dy;
     short color;
+    bool scored;
 } Pedestrian;
 
 typedef void (*SceneRenderer)(void);
@@ -152,7 +155,10 @@ static Pedestrian peds[MAX_PEDS];
 static int score = 0;
 static int best_score = 0;
 static int passed = 0;
+static int cars_passed = 0;
+static int peds_passed = 0;
 static int wait_ticks_total = 0;
+static int ped_wait_ticks_total = 0;
 static int elapsed_ticks = 0;
 static EndReason end_reason = END_TIME;
 static int crash_x = SCREEN_W / 2;
@@ -208,6 +214,7 @@ bool ped_flow_allowed_vertical(void);
 int count_active_pedestrians(bool horizontal);
 void release_waiting_pedestrians(bool horizontal, int count);
 void maybe_spawn_pedestrians_for_current_state(void);
+bool car_ped_overlap(const Car *car, const Pedestrian *ped);
 
 void wait_for_vsync(void) {
     *pixel_ctrl_ptr = 1;
@@ -604,6 +611,7 @@ void spawn_pedestrian(bool horizontal, int x, int y, int dx, int dy, short color
             peds[i].dx = dx;
             peds[i].dy = dy;
             peds[i].color = color;
+            peds[i].scored = false;
             return;
         }
     }
@@ -733,11 +741,21 @@ void update_pedestrians(void) {
 
         if (peds[i].horizontal) {
             if (peds[i].x < PED_H_START_L - 14 || peds[i].x > PED_H_START_R + 14) {
+                if (!peds[i].scored) {
+                    peds[i].scored = true;
+                    peds_passed++;
+                    passed = cars_passed + peds_passed;
+                }
                 peds[i].active = false;
                 continue;
             }
         } else {
             if (peds[i].y < PED_V_START_T - 14 || peds[i].y > PED_V_START_B + 14) {
+                if (!peds[i].scored) {
+                    peds[i].scored = true;
+                    peds_passed++;
+                    passed = cars_passed + peds_passed;
+                }
                 peds[i].active = false;
                 continue;
             }
@@ -834,6 +852,18 @@ bool cars_overlap(const Car *a, const Car *b) {
     return rect_overlap(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2);
 }
 
+bool car_ped_overlap(const Car *car, const Pedestrian *ped) {
+    int ax1 = car->x;
+    int ay1 = car->y;
+    int ax2 = car->x + car_width(car) - 1;
+    int ay2 = car->y + car_height(car) - 1;
+    int bx1 = ped->x;
+    int by1 = ped->y;
+    int bx2 = ped->x + PED_SIZE - 1;
+    int by2 = ped->y + 9;
+    return rect_overlap(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2);
+}
+
 void reset_round(void) {
     light_state = NS_GREEN;
     next_green_state = NS_GREEN;
@@ -842,7 +872,10 @@ void reset_round(void) {
     phase_ticks = 0;
     score = 0;
     passed = 0;
+    cars_passed = 0;
+    peds_passed = 0;
     wait_ticks_total = 0;
+    ped_wait_ticks_total = 0;
     elapsed_ticks = 0;
     end_reason = END_TIME;
     crash_x = SCREEN_W / 2;
@@ -952,6 +985,17 @@ bool detect_crash(void) {
             return true;
         }
     }
+
+    for (int i = 0; i < MAX_CARS; i++) {
+        if (!cars[i].active) continue;
+        for (int j = 0; j < MAX_PEDS; j++) {
+            if (!peds[j].active) continue;
+            if (!car_ped_overlap(&cars[i], &peds[j])) continue;
+            crash_x = (cars[i].x + peds[j].x) / 2;
+            crash_y = (cars[i].y + peds[j].y) / 2;
+            return true;
+        }
+    }
     return false;
 }
 
@@ -988,7 +1032,11 @@ bool conflict_zone_blocked(const Car *car, int nx, int ny) {
 }
 
 void update_score(void) {
-    score = passed * PASS_SCORE - (wait_ticks_total / WAIT_PENALTY_DIVISOR);
+    passed = cars_passed + peds_passed;
+    score = cars_passed * CAR_PASS_SCORE
+          + peds_passed * PED_PASS_SCORE
+          - (wait_ticks_total / WAIT_PENALTY_DIVISOR)
+          - (ped_wait_ticks_total / PED_WAIT_PENALTY_DIVISOR);
     if (score < 0) {
         score = 0;
     }
@@ -1148,7 +1196,8 @@ void update_cars(void) {
         if (cars[i].x < -24 || cars[i].x > SCREEN_W + 24 || cars[i].y < -24 || cars[i].y > SCREEN_H + 24) {
             if (!cars[i].scored && passed_stop_line(&cars[i])) {
                 cars[i].scored = true;
-                passed++;
+                cars_passed++;
+                passed = cars_passed + peds_passed;
             }
             cars[i].active = false;
         }
@@ -1607,6 +1656,8 @@ void draw_hud(void) {
     draw_int(122, 26, queue_w, ORANGE, 1);
     draw_text(148, 26, "E", WHITE, 1);
     draw_int(156, 26, queue_e, ORANGE, 1);
+    draw_text(194, 26, "P", WHITE, 1);
+    draw_int(208, 26, peds_passed, MAGENTA, 1);
 
     draw_panel(4, 205, 68, 237, DARKGRAY, ROAD_EDGE);
     draw_text_in_box(8, 64, 213, "MODE", WHITE, 1);
@@ -1833,6 +1884,7 @@ int main(void) {
                 maybe_queue_ped_request();
                 if (ped_waiting_horizontal > 0) ped_wait_ticks_horizontal++;
                 if (ped_waiting_vertical > 0) ped_wait_ticks_vertical++;
+                ped_wait_ticks_total += ped_waiting_horizontal + ped_waiting_vertical;
                 maybe_spawn_car();
                 update_cars();
                 bool ped_phase_before = is_ped_walk_state(light_state);
