@@ -41,6 +41,8 @@
 #define PED_WALK_TICKS 56
 #define PED_REQUEST_CHANCE_PERCENT 3
 #define MAX_PED_WAITING 9
+#define MAX_PEDS_PER_PHASE 6
+#define MANUAL_PED_REQUEST_COUNT 2
 #define PED_TOP_Y 81
 #define PED_BOTTOM_Y 154
 #define PED_LEFT_X 119
@@ -77,7 +79,8 @@ typedef enum {
     EW_GREEN,
     EW_YELLOW,
     PED_HORIZONTAL_WALK,
-    PED_VERTICAL_WALK
+    PED_VERTICAL_WALK,
+    PED_ALL_WALK
 } LightState;
 
 typedef enum {
@@ -200,6 +203,11 @@ const char *ped_status_horizontal_label(void);
 const char *ped_status_vertical_label(void);
 short ped_status_horizontal_color(void);
 short ped_status_vertical_color(void);
+bool ped_flow_allowed_horizontal(void);
+bool ped_flow_allowed_vertical(void);
+int count_active_pedestrians(bool horizontal);
+void release_waiting_pedestrians(bool horizontal, int count);
+void maybe_spawn_pedestrians_for_current_state(void);
 
 void wait_for_vsync(void) {
     *pixel_ctrl_ptr = 1;
@@ -535,7 +543,7 @@ void update_rush_cycle(void) {
 
 
 bool is_ped_walk_state(LightState state) {
-    return state == PED_HORIZONTAL_WALK || state == PED_VERTICAL_WALK;
+    return state == PED_HORIZONTAL_WALK || state == PED_VERTICAL_WALK || state == PED_ALL_WALK;
 }
 
 bool is_vehicle_green_state(LightState state) {
@@ -548,12 +556,7 @@ bool any_ped_request_pending(void) {
 
 LightState choose_pending_ped_state(void) {
     if (ped_waiting_horizontal > 0 && ped_waiting_vertical > 0) {
-        if (ped_waiting_horizontal > ped_waiting_vertical) return PED_HORIZONTAL_WALK;
-        if (ped_waiting_vertical > ped_waiting_horizontal) return PED_VERTICAL_WALK;
-
-        LightState chosen = ped_priority_horizontal ? PED_HORIZONTAL_WALK : PED_VERTICAL_WALK;
-        ped_priority_horizontal = !ped_priority_horizontal;
-        return chosen;
+        return PED_ALL_WALK;
     }
     if (ped_waiting_horizontal > 0) return PED_HORIZONTAL_WALK;
     if (ped_waiting_vertical > 0) return PED_VERTICAL_WALK;
@@ -576,6 +579,23 @@ void clear_pedestrians(void) {
     }
 }
 
+bool ped_flow_allowed_horizontal(void) {
+    return light_state == EW_GREEN || light_state == PED_HORIZONTAL_WALK || light_state == PED_ALL_WALK;
+}
+
+bool ped_flow_allowed_vertical(void) {
+    return light_state == NS_GREEN || light_state == PED_VERTICAL_WALK || light_state == PED_ALL_WALK;
+}
+
+int count_active_pedestrians(bool horizontal) {
+    int count = 0;
+    for (int i = 0; i < MAX_PEDS; i++) {
+        if (!peds[i].active) continue;
+        if (peds[i].horizontal == horizontal) count++;
+    }
+    return count;
+}
+
 void spawn_pedestrian(bool horizontal, int x, int y, int dx, int dy, short color) {
     for (int i = 0; i < MAX_PEDS; i++) {
         if (!peds[i].active) {
@@ -591,56 +611,115 @@ void spawn_pedestrian(bool horizontal, int x, int y, int dx, int dy, short color
     }
 }
 
+void add_ped_waiters(bool horizontal, int count) {
+    for (int i = 0; i < count; i++) {
+        if (horizontal) {
+            if (ped_waiting_horizontal < MAX_PED_WAITING) ped_waiting_horizontal++;
+        } else {
+            if (ped_waiting_vertical < MAX_PED_WAITING) ped_waiting_vertical++;
+        }
+    }
+}
+
 void maybe_queue_ped_request(void) {
     if ((int)(next_rand() % 100u) >= PED_REQUEST_CHANCE_PERCENT) {
         return;
     }
 
     if ((next_rand() & 1u) == 0u) {
-        if (ped_waiting_horizontal < MAX_PED_WAITING) ped_waiting_horizontal++;
+        add_ped_waiters(true, 1);
     } else {
-        if (ped_waiting_vertical < MAX_PED_WAITING) ped_waiting_vertical++;
+        add_ped_waiters(false, 1);
+    }
+}
+
+void release_waiting_pedestrians(bool horizontal, int count) {
+    if (count <= 0) return;
+
+    int active_total = count_active_pedestrians(true) + count_active_pedestrians(false);
+    if (count > MAX_PEDS - active_total) {
+        count = MAX_PEDS - active_total;
+    }
+    if (count <= 0) return;
+
+    for (int i = 0; i < count; i++) {
+        int offset = (i / 2) * 10;
+        short color = ((ped_groups_served + i) & 1) == 0 ? CYAN : MAGENTA;
+
+        if (horizontal) {
+            if (ped_waiting_horizontal <= 0) break;
+            ped_waiting_horizontal--;
+            if ((i & 1) == 0) {
+                spawn_pedestrian(true, PED_H_START_L - 4 - offset, PED_TOP_Y + 1, 2, 0, color);
+            } else {
+                spawn_pedestrian(true, PED_H_START_R + 4 + offset, PED_BOTTOM_Y + 1, -2, 0, color);
+            }
+        } else {
+            if (ped_waiting_vertical <= 0) break;
+            ped_waiting_vertical--;
+            if ((i & 1) == 0) {
+                spawn_pedestrian(false, PED_LEFT_X + 1, PED_V_START_T - 4 - offset, 0, 2, color);
+            } else {
+                spawn_pedestrian(false, PED_RIGHT_X + 1, PED_V_START_B + 4 + offset, 0, -2, color);
+            }
+        }
+        ped_groups_served++;
     }
 }
 
 void start_ped_phase(LightState walk_state) {
-    clear_pedestrians();
     phase_ticks = 0;
     light_state = walk_state;
 
     if (walk_state == PED_HORIZONTAL_WALK) {
-        int served = ped_waiting_horizontal;
-        if (served > 2) served = 2;
-        if (served < 1) served = 1;
-
-        if (ped_waiting_horizontal >= served) ped_waiting_horizontal -= served;
-        else ped_waiting_horizontal = 0;
         ped_wait_ticks_horizontal = 0;
-        ped_groups_served += served;
-
-        if (served >= 1) spawn_pedestrian(true, PED_H_START_L - 4, PED_TOP_Y + 1, 2, 0, CYAN);
-        if (served >= 2) spawn_pedestrian(true, PED_H_START_R + 4, PED_BOTTOM_Y + 1, -2, 0, MAGENTA);
+        release_waiting_pedestrians(true, MAX_PEDS_PER_PHASE);
     } else if (walk_state == PED_VERTICAL_WALK) {
-        int served = ped_waiting_vertical;
-        if (served > 2) served = 2;
-        if (served < 1) served = 1;
-
-        if (ped_waiting_vertical >= served) ped_waiting_vertical -= served;
-        else ped_waiting_vertical = 0;
         ped_wait_ticks_vertical = 0;
-        ped_groups_served += served;
+        release_waiting_pedestrians(false, MAX_PEDS_PER_PHASE);
+    } else if (walk_state == PED_ALL_WALK) {
+        ped_wait_ticks_horizontal = 0;
+        ped_wait_ticks_vertical = 0;
+        release_waiting_pedestrians(true, 4);
+        release_waiting_pedestrians(false, 4);
+    }
+}
 
-        if (served >= 1) spawn_pedestrian(false, PED_LEFT_X + 1, PED_V_START_T - 4, 0, 2, CYAN);
-        if (served >= 2) spawn_pedestrian(false, PED_RIGHT_X + 1, PED_V_START_B + 4, 0, -2, MAGENTA);
+void maybe_spawn_pedestrians_for_current_state(void) {
+    bool exclusive_walk = is_ped_walk_state(light_state);
+    int spawn_tick = exclusive_walk ? 6 : 8;
+
+    if (ped_flow_allowed_horizontal() && ped_waiting_horizontal > 0) {
+        int active_h = count_active_pedestrians(true);
+        if (active_h == 0 || (phase_ticks % spawn_tick) == 0) {
+            int count = ped_waiting_horizontal;
+            if (count > 2) count = 2;
+            release_waiting_pedestrians(true, count);
+        }
+    }
+
+    if (ped_flow_allowed_vertical() && ped_waiting_vertical > 0) {
+        int active_v = count_active_pedestrians(false);
+        if (active_v == 0 || (phase_ticks % spawn_tick) == 0) {
+            int count = ped_waiting_vertical;
+            if (count > 2) count = 2;
+            release_waiting_pedestrians(false, count);
+        }
     }
 }
 
 void update_pedestrians(void) {
-    if (!is_ped_walk_state(light_state)) {
-        return;
+    bool exclusive_walk = is_ped_walk_state(light_state);
+
+    if (exclusive_walk) {
+        phase_ticks++;
+        if (phase_ticks < PED_WALK_TICKS) {
+            maybe_spawn_pedestrians_for_current_state();
+        }
+    } else if (ped_flow_allowed_horizontal() || ped_flow_allowed_vertical()) {
+        maybe_spawn_pedestrians_for_current_state();
     }
 
-    phase_ticks++;
     bool any_active = false;
 
     for (int i = 0; i < MAX_PEDS; i++) {
@@ -649,7 +728,7 @@ void update_pedestrians(void) {
         peds[i].x += peds[i].dx;
         peds[i].y += peds[i].dy;
 
-        if (light_state == PED_HORIZONTAL_WALK) {
+        if (peds[i].horizontal) {
             if (peds[i].x < PED_H_START_L - 14 || peds[i].x > PED_H_START_R + 14) {
                 peds[i].active = false;
                 continue;
@@ -663,34 +742,33 @@ void update_pedestrians(void) {
         any_active = true;
     }
 
-    if (!any_active || phase_ticks >= PED_WALK_TICKS) {
-        clear_pedestrians();
+    if (exclusive_walk && phase_ticks >= PED_WALK_TICKS && !any_active) {
         light_state = ALL_RED;
         phase_ticks = 0;
-        next_green_state = (mode == AUTO_MODE) ? resume_green_state : ALL_RED;
+        next_green_state = (mode == AUTO_MODE) ? choose_resume_green_state() : ALL_RED;
     }
 }
 
 const char *ped_status_horizontal_label(void) {
-    if (light_state == PED_HORIZONTAL_WALK) return "WALK";
+    if (ped_flow_allowed_horizontal() && count_active_pedestrians(true) > 0) return "GO";
     if (ped_waiting_horizontal > 0) return "WAIT";
     return "CLEAR";
 }
 
 const char *ped_status_vertical_label(void) {
-    if (light_state == PED_VERTICAL_WALK) return "WALK";
+    if (ped_flow_allowed_vertical() && count_active_pedestrians(false) > 0) return "GO";
     if (ped_waiting_vertical > 0) return "WAIT";
     return "CLEAR";
 }
 
 short ped_status_horizontal_color(void) {
-    if (light_state == PED_HORIZONTAL_WALK) return GREEN;
+    if (ped_flow_allowed_horizontal() && count_active_pedestrians(true) > 0) return GREEN;
     if (ped_waiting_horizontal > 0) return ORANGE;
     return CYAN;
 }
 
 short ped_status_vertical_color(void) {
-    if (light_state == PED_VERTICAL_WALK) return GREEN;
+    if (ped_flow_allowed_vertical() && count_active_pedestrians(false) > 0) return GREEN;
     if (ped_waiting_vertical > 0) return ORANGE;
     return CYAN;
 }
@@ -957,26 +1035,28 @@ bool blocked_by_leader(const Car *car, int nx, int ny) {
 
 const char *light_state_label(void) {
     switch (light_state) {
-        case NS_GREEN:            return "NS GO";
-        case NS_YELLOW:           return "NS WAIT";
+        case NS_GREEN:            return "N/S GO";
+        case NS_YELLOW:           return "CHANGE";
         case ALL_RED:             return "STOP";
-        case EW_GREEN:            return "EW GO";
-        case EW_YELLOW:           return "EW WAIT";
-        case PED_HORIZONTAL_WALK: return "TOP BOT";
-        case PED_VERTICAL_WALK:   return "LEFT RIGHT";
+        case EW_GREEN:            return "E/W GO";
+        case EW_YELLOW:           return "CHANGE";
+        case PED_HORIZONTAL_WALK: return "LEFT/RIGHT";
+        case PED_VERTICAL_WALK:   return "UP/DOWN";
+        case PED_ALL_WALK:        return "ALL WALK";
         default:                  return "STOP";
     }
 }
 
 const char *light_state_long_label(void) {
     switch (light_state) {
-        case NS_GREEN:            return "NS GO";
-        case NS_YELLOW:           return "NS WAIT";
+        case NS_GREEN:            return "N/S GO";
+        case NS_YELLOW:           return "CHANGE";
         case ALL_RED:             return "STOP";
-        case EW_GREEN:            return "EW GO";
-        case EW_YELLOW:           return "EW WAIT";
-        case PED_HORIZONTAL_WALK: return "TOP BOT WALK";
-        case PED_VERTICAL_WALK:   return "LEFT RIGHT WALK";
+        case EW_GREEN:            return "E/W GO";
+        case EW_YELLOW:           return "CHANGE";
+        case PED_HORIZONTAL_WALK: return "LEFT RIGHT WALK";
+        case PED_VERTICAL_WALK:   return "UP DOWN WALK";
+        case PED_ALL_WALK:        return "ALL WALK";
         default:                  return "STOP";
     }
 }
@@ -1005,6 +1085,7 @@ int phase_countdown_ticks(void) {
             break;
         case PED_HORIZONTAL_WALK:
         case PED_VERTICAL_WALK:
+        case PED_ALL_WALK:
             remaining = PED_WALK_TICKS - phase_ticks;
             break;
         default:
@@ -1068,28 +1149,26 @@ void update_lights_auto(void) {
         int ns_load = queue_n + queue_s;
         int ew_load = queue_w + queue_e;
         bool reached_max = phase_ticks >= MAX_GREEN_TICKS;
-        bool ped_due = any_ped_request_pending() && phase_ticks >= NS_GREEN_TICKS;
-        bool should_yield = ped_due ||
+        bool scramble_due = (ped_waiting_horizontal > 0 && ped_waiting_vertical > 0 && phase_ticks >= NS_GREEN_TICKS);
+        bool should_yield = scramble_due ||
                             ((phase_ticks >= NS_GREEN_TICKS) &&
                              ((ew_load > ns_load) || (ew_load > 0 && ns_load == 0) || reached_max));
         if (should_yield) {
             light_state = NS_YELLOW;
-            resume_green_state = choose_resume_green_state();
-            next_green_state = ped_due ? choose_pending_ped_state() : EW_GREEN;
+            next_green_state = scramble_due ? PED_ALL_WALK : EW_GREEN;
             phase_ticks = 0;
         }
     } else if (light_state == EW_GREEN) {
         int ns_load = queue_n + queue_s;
         int ew_load = queue_w + queue_e;
         bool reached_max = phase_ticks >= MAX_GREEN_TICKS;
-        bool ped_due = any_ped_request_pending() && phase_ticks >= EW_GREEN_TICKS;
-        bool should_yield = ped_due ||
+        bool scramble_due = (ped_waiting_horizontal > 0 && ped_waiting_vertical > 0 && phase_ticks >= EW_GREEN_TICKS);
+        bool should_yield = scramble_due ||
                             ((phase_ticks >= EW_GREEN_TICKS) &&
                              ((ns_load > ew_load) || (ns_load > 0 && ew_load == 0) || reached_max));
         if (should_yield) {
             light_state = EW_YELLOW;
-            resume_green_state = choose_resume_green_state();
-            next_green_state = ped_due ? choose_pending_ped_state() : NS_GREEN;
+            next_green_state = scramble_due ? PED_ALL_WALK : NS_GREEN;
             phase_ticks = 0;
         }
     }
@@ -1124,6 +1203,32 @@ void update_light_transition(void) {
 }
 
 void request_light_state(LightState target) {
+    if (target == PED_HORIZONTAL_WALK) {
+        add_ped_waiters(true, MANUAL_PED_REQUEST_COUNT);
+        return;
+    }
+
+    if (target == PED_VERTICAL_WALK) {
+        add_ped_waiters(false, MANUAL_PED_REQUEST_COUNT);
+        return;
+    }
+
+    if (target == PED_ALL_WALK) {
+        resume_green_state = ALL_RED;
+        next_green_state = PED_ALL_WALK;
+
+        if (light_state == NS_GREEN) {
+            light_state = NS_YELLOW;
+            phase_ticks = 0;
+        } else if (light_state == EW_GREEN) {
+            light_state = EW_YELLOW;
+            phase_ticks = 0;
+        } else if (light_state == ALL_RED && ped_area_clear()) {
+            start_ped_phase(PED_ALL_WALK);
+        }
+        return;
+    }
+
     if (target == ALL_RED) {
         next_green_state = ALL_RED;
         if (light_state == NS_GREEN) {
@@ -1138,36 +1243,20 @@ void request_light_state(LightState target) {
         return;
     }
 
-    if (target == PED_HORIZONTAL_WALK) {
-        if (ped_waiting_horizontal < MAX_PED_WAITING) ped_waiting_horizontal++;
-        resume_green_state = ALL_RED;
-    } else if (target == PED_VERTICAL_WALK) {
-        if (ped_waiting_vertical < MAX_PED_WAITING) ped_waiting_vertical++;
-        resume_green_state = ALL_RED;
-    }
-
     next_green_state = target;
     if (light_state == target) {
         return;
     }
 
-    if (light_state == NS_GREEN) {
-        if (target == NS_GREEN) return;
+    if (light_state == NS_GREEN && target == EW_GREEN) {
         light_state = NS_YELLOW;
         phase_ticks = 0;
-    } else if (light_state == EW_GREEN) {
-        if (target == EW_GREEN) return;
+    } else if (light_state == EW_GREEN && target == NS_GREEN) {
         light_state = EW_YELLOW;
         phase_ticks = 0;
     } else if (light_state == ALL_RED) {
-        if (is_ped_walk_state(target)) {
-            if (ped_area_clear()) {
-                start_ped_phase(target);
-            }
-        } else {
-            light_state = target;
-            phase_ticks = 0;
-        }
+        light_state = target;
+        phase_ticks = 0;
     }
 }
 
@@ -1316,6 +1405,7 @@ void draw_lights(void) {
         case ALL_RED:
         case PED_HORIZONTAL_WALK:
         case PED_VERTICAL_WALK:
+        case PED_ALL_WALK:
             ns_red = RED;
             ew_red = RED;
             break;
@@ -1433,11 +1523,19 @@ void draw_crosswalk_guides(void) {
     short top_bot_color = 0;
     short left_right_color = 0;
 
-    if (light_state == PED_HORIZONTAL_WALK) top_bot_color = GREEN;
-    else if (ped_waiting_horizontal > 0) top_bot_color = YELLOW;
+    if ((ped_flow_allowed_horizontal() && (count_active_pedestrians(true) > 0 || ped_waiting_horizontal > 0)) ||
+        light_state == PED_ALL_WALK) {
+        top_bot_color = GREEN;
+    } else if (ped_waiting_horizontal > 0) {
+        top_bot_color = YELLOW;
+    }
 
-    if (light_state == PED_VERTICAL_WALK) left_right_color = GREEN;
-    else if (ped_waiting_vertical > 0) left_right_color = YELLOW;
+    if ((ped_flow_allowed_vertical() && (count_active_pedestrians(false) > 0 || ped_waiting_vertical > 0)) ||
+        light_state == PED_ALL_WALK) {
+        left_right_color = GREEN;
+    } else if (ped_waiting_vertical > 0) {
+        left_right_color = YELLOW;
+    }
 
     if (top_bot_color != 0) {
         draw_box(134, 79, 184, 80, top_bot_color);
@@ -1472,54 +1570,43 @@ void draw_cars(void) {
 }
 
 void draw_hud(void) {
-    int wait_seconds = wait_seconds_total();
-    int waiting_total = ped_waiting_horizontal + ped_waiting_vertical;
-
-    draw_label_strip(4, 3, 78, 19, DARKGRAY);
+    draw_label_strip(4, 3, 102, 19, DARKGRAY);
     draw_text(10, 7, "SCORE", WHITE, 1);
-    draw_int_right(72, 7, score, YELLOW, 1);
+    draw_int_right(96, 7, score, YELLOW, 1);
 
-    draw_label_strip(82, 3, 156, 19, DARKGRAY);
-    draw_text(88, 7, "PASS", WHITE, 1);
-    draw_int_right(150, 7, passed, GREEN, 1);
+    draw_label_strip(108, 3, 206, 19, DARKGRAY);
+    draw_text(114, 7, "PASS", WHITE, 1);
+    draw_int_right(200, 7, passed, GREEN, 1);
 
-    draw_label_strip(160, 3, 234, 19, DARKGRAY);
-    draw_text(166, 7, "WAIT", WHITE, 1);
-    draw_int_right(228, 7, wait_seconds, ORANGE, 1);
-
-    draw_label_strip(238, 3, 316, 19, DARKGRAY);
-    draw_text(244, 7, "BEST", WHITE, 1);
+    draw_label_strip(212, 3, 316, 19, DARKGRAY);
+    draw_text(218, 7, "BEST", WHITE, 1);
     draw_int_right(310, 7, best_score, MAGENTA, 1);
 
-    draw_label_strip(4, 22, 156, 36, DARKGRAY);
+    draw_label_strip(4, 22, 316, 36, DARKGRAY);
     draw_text(10, 26, "CARS", WHITE, 1);
     draw_text(46, 26, "N", WHITE, 1);
     draw_int(54, 26, queue_n, CYAN, 1);
-    draw_text(72, 26, "S", WHITE, 1);
-    draw_int(80, 26, queue_s, CYAN, 1);
-    draw_text(98, 26, "W", WHITE, 1);
-    draw_int(106, 26, queue_w, ORANGE, 1);
-    draw_text(124, 26, "E", WHITE, 1);
-    draw_int(132, 26, queue_e, ORANGE, 1);
+    draw_text(80, 26, "S", WHITE, 1);
+    draw_int(88, 26, queue_s, CYAN, 1);
+    draw_text(114, 26, "W", WHITE, 1);
+    draw_int(122, 26, queue_w, ORANGE, 1);
+    draw_text(148, 26, "E", WHITE, 1);
+    draw_int(156, 26, queue_e, ORANGE, 1);
 
-    draw_label_strip(162, 22, 316, 36, DARKGRAY);
-    draw_text(168, 26, "PEOPLE WAITING", WHITE, 1);
-    draw_int_right(310, 26, waiting_total, waiting_total > 0 ? ORANGE : GREEN, 1);
+    draw_panel(4, 205, 68, 237, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(8, 64, 213, "MODE", WHITE, 1);
+    draw_text_in_box(8, 64, 225, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
 
-    draw_panel(4, 207, 72, 236, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(8, 68, 214, "MODE", WHITE, 1);
-    draw_text_in_box(8, 68, 226, (mode == AUTO_MODE) ? "AUTO" : "MANUAL", CYAN, 1);
+    draw_panel(74, 205, 170, 237, DARKGRAY, YELLOW);
+    draw_text_in_box(78, 166, 213, "LIGHT", WHITE, 1);
+    draw_text_in_box(78, 166, 225, light_state_label(), YELLOW, 1);
 
-    draw_panel(78, 207, 170, 236, DARKGRAY, YELLOW);
-    draw_text_in_box(82, 166, 214, "LIGHT", WHITE, 1);
-    draw_text_in_box(82, 166, 226, light_state_label(), YELLOW, 1);
-
-    draw_panel(176, 207, 316, 236, DARKGRAY, CYAN);
-    draw_text_in_box(180, 312, 214, "PEOPLE", WHITE, 1);
-    draw_text(188, 221, "TOP BOT", WHITE, 1);
-    draw_int_right(310, 221, ped_waiting_horizontal, ped_waiting_horizontal > 0 ? ORANGE : GREEN, 1);
-    draw_text(188, 229, "LEFT RIGHT", WHITE, 1);
-    draw_int_right(310, 229, ped_waiting_vertical, ped_waiting_vertical > 0 ? ORANGE : GREEN, 1);
+    draw_panel(176, 200, 316, 237, DARKGRAY, CYAN);
+    draw_text(184, 206, "PEOPLE", WHITE, 1);
+    draw_text(184, 216, "UP DOWN", ped_status_vertical_color(), 1);
+    draw_int_right(306, 216, ped_waiting_vertical, ped_status_vertical_color(), 1);
+    draw_text(184, 224, "LEFT RIGHT", ped_status_horizontal_color(), 1);
+    draw_int_right(306, 224, ped_waiting_horizontal, ped_status_horizontal_color(), 1);
 }
 
 void redraw_all(void) {
@@ -1568,9 +1655,10 @@ void draw_static_scene(SceneRenderer renderer) {
 void draw_title_scene(void) {
     draw_page_frame(CITY_BG);
 
-    draw_panel(40, 28, 279, 86, DARKGRAY, ROAD_EDGE);
-    draw_text_in_box(44, 275, 42, "TRAFFIC CONTROL", YELLOW, 2);
-    draw_text_in_box(44, 275, 68, "CARS AND CROSSWALKS", CYAN, 1);
+    draw_panel(40, 28, 279, 92, DARKGRAY, ROAD_EDGE);
+    draw_text_in_box(44, 275, 40, "TRAFFIC CONTROL", YELLOW, 2);
+    draw_text_in_box(44, 275, 64, "CARS AND CROSSWALKS", CYAN, 1);
+    draw_text_in_box(44, 275, 76, "BY ALAN HE AND HARRY ZHANG", WHITE, 1);
 
     draw_box(34, 102, 286, 150, ROAD);
     draw_box(118, 88, 202, 164, ROAD);
@@ -1594,11 +1682,11 @@ void draw_title_scene(void) {
     { Pedestrian demo1 = {true, true, 136, 112, 0, 0, CYAN}; draw_pedestrian_sprite(&demo1); }
     { Pedestrian demo2 = {true, true, 182, 128, 0, 0, MAGENTA}; draw_pedestrian_sprite(&demo2); }
 
-    draw_panel(50, 164, 270, 196, DARKGRAY, DARKGREEN);
-    draw_text_in_box(54, 266, 174, "PRESS SPACE TO START", GREEN, 1);
+    draw_panel(50, 166, 270, 198, DARKGRAY, DARKGREEN);
+    draw_text_in_box(54, 266, 176, "PRESS SPACE TO START", GREEN, 1);
 
-    draw_label_strip(82, 204, 238, 218, DARKGRAY);
-    draw_text_in_box(86, 234, 208, "I HELP", WHITE, 1);
+    draw_label_strip(82, 206, 238, 220, DARKGRAY);
+    draw_text_in_box(86, 234, 210, "I HELP", WHITE, 1);
 }
 
 void draw_title(void) {
@@ -1623,7 +1711,7 @@ void draw_instructions_scene(void) {
     draw_text_in_box(32, 151, 160, "A AUTO MANUAL", WHITE, 1);
     draw_text_in_box(32, 151, 170, "1 NS GREEN", WHITE, 1);
     draw_text_in_box(32, 151, 180, "2 EW GREEN", WHITE, 1);
-    draw_text_in_box(32, 151, 190, "3 ALL RED", WHITE, 1);
+    draw_text_in_box(32, 151, 190, "3 ALL WALK", WHITE, 1);
 
     draw_panel(165, 126, 292, 206, DARKGRAY, CYAN);
     draw_text_in_box(169, 288, 138, "WALK KEYS", CYAN, 1);
@@ -1798,7 +1886,7 @@ int main(void) {
                     redraw_all();
                 } else if (key == 0x26) {   // '3'
                     mode = MANUAL_MODE;
-                    request_light_state(ALL_RED);
+                    request_light_state(PED_ALL_WALK);
                     redraw_all();
                 } else if (key == 0x25) {   // '4'
                     mode = MANUAL_MODE;
@@ -1811,8 +1899,8 @@ int main(void) {
                 } else if (key == 0x1C) {   // 'A'
                     mode = (mode == AUTO_MODE) ? MANUAL_MODE : AUTO_MODE;
                     if (mode == AUTO_MODE && light_state == ALL_RED && next_green_state == ALL_RED) {
-                        next_green_state = any_ped_request_pending() ? choose_pending_ped_state()
-                                                                      : choose_resume_green_state();
+                        next_green_state = (ped_waiting_horizontal > 0 && ped_waiting_vertical > 0)
+                                              ? PED_ALL_WALK : choose_resume_green_state();
                         phase_ticks = 0;
                     }
                     redraw_all();
